@@ -117,6 +117,7 @@ namespace ImprovedCubemapRendering
             probeCamera.nearClipPlane = reflectionProbe.nearClipPlane;
             probeCamera.farClipPlane = reflectionProbe.farClipPlane;
             probeCamera.backgroundColor = reflectionProbe.backgroundColor;
+            probeCamera.cullingMask = reflectionProbe.cullingMask;
 
             //NOTE: To get around the alignment/orentation issues, the camera actually needs to have a flipped setup for reflections
             //This will cause face to be inverted however when rendering, so later we use a bit of a janky "solution" to invert face culling when rendering the cubemaps

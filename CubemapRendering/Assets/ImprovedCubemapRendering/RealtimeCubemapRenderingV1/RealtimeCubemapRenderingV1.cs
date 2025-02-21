@@ -142,6 +142,7 @@ namespace ImprovedCubemapRendering
             probeCamera.nearClipPlane = reflectionProbe.nearClipPlane;
             probeCamera.farClipPlane = reflectionProbe.farClipPlane;
             probeCamera.backgroundColor = reflectionProbe.backgroundColor;
+            probeCamera.cullingMask = reflectionProbe.cullingMask;
 
             //precompute orientations (no reason to recompute these every frame, they won't change!)
             probeCameraRotationXPOS = Quaternion.LookRotation(Vector3.right, Vector3.up);
