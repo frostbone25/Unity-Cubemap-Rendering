@@ -2,19 +2,15 @@
 #define THREAD_GROUP_SIZE_Y 4
 #define THREAD_GROUP_SIZE_Z 1
 
-int CubemapFaceIndex;
-int CubemapFaceResolution;
+int InputResolutionSquare;
 
-RWTexture2D<float4> SceneRender;
+RWTexture2D<float4> Input;
+RWTexture2D<float4> Output;
 
-//NOTE: There is no such thing as a RWTextureCube unfortunately...
-//So to make do, we use a texture2D array.
-RWTexture2DArray<float4> CubemapResult;
-
-#pragma kernel CubemapCombine
+#pragma kernel FlipRenderTarget
 [numthreads(THREAD_GROUP_SIZE_X, THREAD_GROUP_SIZE_Y, THREAD_GROUP_SIZE_Z)]
-void CubemapCombine(uint3 id : SV_DispatchThreadID)
+void FlipRenderTarget(uint3 id : SV_DispatchThreadID)
 {
-    //NOTE: need a -1 offset otherwwise we will get a black border
-    CubemapResult[uint3(id.xy, CubemapFaceIndex)] = SceneRender[uint2(id.x, (CubemapFaceResolution - 1) - id.y)];
+    //NOTE: need to offset by -1 otherwwise we will get a black border
+    Output[id.xy] = Input[uint2(id.x, (InputResolutionSquare - 1) - id.y)];
 }

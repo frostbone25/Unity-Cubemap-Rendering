@@ -1,7 +1,7 @@
-using System.Collections;
-using System.Collections.Generic;
-using System.Globalization;
+#if UNITY_EDITOR
+using System;
 using UnityEditor;
+#endif
 
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -48,27 +48,38 @@ namespace ImprovedCubemapRendering
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
 
-        private float nextUpdateInterval;
-
         private ReflectionProbe reflectionProbe;
-
-        private RenderTexture probeCameraRender;
-        private RenderTexture cubemapRender;
-        private RenderTexture finalCubemap;
 
         private GameObject probeCameraGameObject;
         private Camera probeCamera;
 
-        private RenderTextureConverter renderTextureConverter;
+        //NOTE: it would be ideal to have to only need to deal with 2 render targets at minimum (camera render target, and cubemap)
+        //however we can't write directly into a "cubemap" dimension render target, because there is no such thing as RWTextureCUBE.
+        //not even a RWTexture2D array works with the "cubemap" dimension even though a cubemap is a Tex2DArray with 6 slices
+        //unity complains that there is a mismatch of output texture dimension (expects 5, gets 4) so this is how we have to deal with it unfortunately
+        private RenderTexture probeCameraRender;
+        private RenderTexture flippedCameraRender;
+        private RenderTexture finalCubemap;
 
         private static int renderTargetDepthBits = 32; //0 16 24 32
 
-        private int computeShaderKernelCubemapCombine;
-        private uint computeShaderThreadGroupSizeX = 0;
-        private uint computeShaderThreadGroupSizeY = 0;
-        private uint computeShaderThreadGroupSizeZ = 0;
+        private Quaternion probeCameraRotationXPOS;
+        private Quaternion probeCameraRotationXNEG;
+        private Quaternion probeCameraRotationYPOS;
+        private Quaternion probeCameraRotationYNEG;
+        private Quaternion probeCameraRotationZPOS;
+        private Quaternion probeCameraRotationZNEG;
+
+        private int computeShaderKernelFlipRenderTarget;
+        private int computeShaderThreadGroupSizeX = 0;
+        private int computeShaderThreadGroupSizeY = 0;
+        private int computeShaderThreadGroupSizeZ = 0;
 
         private bool isSetup;
+        private bool isRealtimeRenderingSetup;
+
+        private float nextUpdateInterval;
+        private float updateTime;
 
         //|||||||||||||||||||||||||||||||||||||| UNITY ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| UNITY ||||||||||||||||||||||||||||||||||||||
@@ -101,13 +112,19 @@ namespace ImprovedCubemapRendering
         /// </summary>
         private void Setup()
         {
-            //setup our render texture converter class so we can convert render textures to texture2D objects efficently/easily
-            if (renderTextureConverter == null)
-                renderTextureConverter = new RenderTextureConverter();
-
+#if UNITY_EDITOR
             //get our compute shader manually if for whatever reason it wasn't assigned
             if (cubemapRenderingCompute == null)
                 cubemapRenderingCompute = AssetDatabase.LoadAssetAtPath<ComputeShader>("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV1/RealtimeCubemapRenderingV1.compute");
+#endif
+
+            //if there is no compute shader period, we are in trouble and we can't continue!
+            //the compute shader is needed so we can flip the render target so that the faces show up correctly on the final cubemap!
+            if (cubemapRenderingCompute == null)
+            {
+                isSetup = false;
+                return;
+            }
 
             //get the main reflection probe
             reflectionProbe = GetComponent<ReflectionProbe>();
@@ -126,6 +143,19 @@ namespace ImprovedCubemapRendering
             probeCamera.nearClipPlane = reflectionProbe.nearClipPlane;
             probeCamera.farClipPlane = reflectionProbe.farClipPlane;
             probeCamera.backgroundColor = reflectionProbe.backgroundColor;
+
+            //precompute orientations (no reason to recompute these every frame, they won't change!)
+            probeCameraRotationXPOS = Quaternion.LookRotation(Vector3.right, Vector3.up);
+            probeCameraRotationXNEG = Quaternion.LookRotation(Vector3.left, Vector3.up);
+            probeCameraRotationYPOS = Quaternion.LookRotation(Vector3.up, Vector3.down);
+            probeCameraRotationYNEG = Quaternion.LookRotation(Vector3.down, Vector3.down);
+            probeCameraRotationZPOS = Quaternion.LookRotation(Vector3.forward, Vector3.up);
+            probeCameraRotationZNEG = Quaternion.LookRotation(Vector3.back, Vector3.up);
+
+            //even though the impact is likely negligible we will compute this once instead of having to do it every frame
+            updateTime = 1.0f / updateFPS;
+
+            isSetup = true;
         }
 
         /// <summary>
@@ -136,19 +166,12 @@ namespace ImprovedCubemapRendering
             //if we have these render targets still around, make sure we clean it up before we start
             CleanupRealtimeRendering();
 
+            if (!isSetup)
+                return;
+
             //start with no reflection data in the scene (at least on meshes within bounds of this reflection probe)
             //NOTE: Not implemented here, but if you want multi-bounce static reflections, we could just feed the previous render target here and reflections will naturally get recursively captured.
             reflectionProbe.customBakedTexture = null;
-
-            //NOTE: Since there is no native "RWTextureCube" we use a Tex2DArray with 6 slices which is similar to a cubemap setup.
-            cubemapRender = new RenderTexture(reflectionProbe.resolution, reflectionProbe.resolution, renderTargetDepthBits, GetRenderTextureFormatType(formatType));
-            cubemapRender.filterMode = FilterMode.Trilinear;
-            cubemapRender.wrapMode = TextureWrapMode.Clamp;
-            cubemapRender.volumeDepth = 6; //6 faces in cubemap
-            cubemapRender.dimension = UnityEngine.Rendering.TextureDimension.Tex2DArray;
-            cubemapRender.enableRandomWrite = true;
-            cubemapRender.isPowerOfTwo = true;
-            cubemapRender.Create();
 
             //NOTE: This is a workaround since "RWTextureCube" objects don't exist in compute shaders, and we are working instead with a RWTexture2DArray with 6 elements.
             //Most shaders in the scene will expect a cubemap sampler, so we will create another render texture, with the cube dimension.
@@ -170,6 +193,14 @@ namespace ImprovedCubemapRendering
             probeCameraRender.isPowerOfTwo = true;
             probeCameraRender.Create();
 
+            //create a regular 2D render target for the camera
+            flippedCameraRender = new RenderTexture(reflectionProbe.resolution, reflectionProbe.resolution, renderTargetDepthBits, GetRenderTextureFormatType(formatType));
+            flippedCameraRender.filterMode = FilterMode.Trilinear;
+            flippedCameraRender.wrapMode = TextureWrapMode.Clamp;
+            flippedCameraRender.enableRandomWrite = true;
+            flippedCameraRender.isPowerOfTwo = true;
+            flippedCameraRender.Create();
+
             //feed the camera our render target so whatever it renders goes into our own render target
             probeCamera.targetTexture = probeCameraRender;
 
@@ -178,11 +209,21 @@ namespace ImprovedCubemapRendering
             reflectionProbe.customBakedTexture = finalCubemap;
 
             //get some data from the compute shader once (they don't change, no reason to get them every frame anyway)
-            computeShaderKernelCubemapCombine = cubemapRenderingCompute.FindKernel("CubemapCombine");
-            cubemapRenderingCompute.GetKernelThreadGroupSizes(computeShaderKernelCubemapCombine, out computeShaderThreadGroupSizeX, out computeShaderThreadGroupSizeY, out computeShaderThreadGroupSizeZ);
+            computeShaderKernelFlipRenderTarget = cubemapRenderingCompute.FindKernel("FlipRenderTarget");
+
+            //to save constantly needing to compute thread group sizes, we only need to do it once here because it doesn't change
+            //the only time we need to change this is if the render target changes resolution, and in that case we just need to set things up again
+            cubemapRenderingCompute.GetKernelThreadGroupSizes(computeShaderKernelFlipRenderTarget, out uint threadGroupSizeX, out uint threadGroupSizeY, out uint threadGroupSizeZ);
+            computeShaderThreadGroupSizeX = Mathf.CeilToInt(flippedCameraRender.width / threadGroupSizeX);
+            computeShaderThreadGroupSizeY = Mathf.CeilToInt(flippedCameraRender.width / threadGroupSizeY);
+            computeShaderThreadGroupSizeZ = (int)threadGroupSizeZ;
+
+            //set the render resolution once, don't need to do it every frame
+            //again only time this needs to be updated is if resolutions change, and in that case we just need to set stuff up again
+            cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV1.InputResolutionSquare, reflectionProbe.resolution);
 
             //we are setup now to start rendering!
-            isSetup = true;
+            isRealtimeRenderingSetup = true;
         }
 
         //|||||||||||||||||||||||||||||||||||||| CLEANUP ||||||||||||||||||||||||||||||||||||||
@@ -201,6 +242,8 @@ namespace ImprovedCubemapRendering
             //make sure these references are gone
             probeCameraGameObject = null;
             probeCamera = null;
+
+            isSetup = false;
         }
 
         /// <summary>
@@ -211,13 +254,13 @@ namespace ImprovedCubemapRendering
             if(probeCameraRender != null && probeCameraRender.IsCreated())
                 probeCameraRender.Release();
 
-            if (cubemapRender != null && cubemapRender.IsCreated())
-                cubemapRender.Release();
+            if (flippedCameraRender != null && flippedCameraRender.IsCreated())
+                flippedCameraRender.Release();
 
             if (finalCubemap != null && finalCubemap.IsCreated())
                 finalCubemap.Release();
 
-            isSetup = false;
+            isRealtimeRenderingSetup = false;
         }
 
         //|||||||||||||||||||||||||||||||||||||| RENDER REALTIME CUBEMAP ||||||||||||||||||||||||||||||||||||||
@@ -226,84 +269,97 @@ namespace ImprovedCubemapRendering
 
         public void RenderRealtimeCubemap()
         {
+            //if we are not setup, we can't render!
             if (!isSetup)
                 return;
 
+            //if it's not our time to update, then don't render!
             if (Time.time < nextUpdateInterval)
                 return;
 
-            //|||||||||||||||||||||||||||||||||||||| RENDER CUBEMAP FACES ||||||||||||||||||||||||||||||||||||||
-            //|||||||||||||||||||||||||||||||||||||| RENDER CUBEMAP FACES ||||||||||||||||||||||||||||||||||||||
-            //|||||||||||||||||||||||||||||||||||||| RENDER CUBEMAP FACES ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| RENDER AND COMBINE CUBEMAP FACES ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| RENDER AND COMBINE CUBEMAP FACES ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| RENDER AND COMBINE CUBEMAP FACES ||||||||||||||||||||||||||||||||||||||
             //here we actually render the scene in 6 different axis
             //render the camera on a given orientation, then combine the result back into our final cubemap which is handled with the compute shader
 
             //X Positive (X+)
-            probeCameraGameObject.transform.rotation = Quaternion.LookRotation(Vector3.right, Vector3.up);
+            //rotate and render view
+            probeCameraGameObject.transform.rotation = probeCameraRotationXPOS;
             probeCamera.Render();
-            cubemapRenderingCompute.SetInt("CubemapFaceIndex", 0);
-            cubemapRenderingCompute.SetInt("CubemapFaceResolution", reflectionProbe.resolution);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "SceneRender", probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "CubemapResult", cubemapRender);
-            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, Mathf.CeilToInt(cubemapRender.width / computeShaderThreadGroupSizeX), Mathf.CeilToInt(cubemapRender.width / computeShaderThreadGroupSizeY), 1);
+
+            //flip render target
+            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Input, probeCameraRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Output, flippedCameraRender);
+            cubemapRenderingCompute.Dispatch(computeShaderKernelFlipRenderTarget, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
+            
+            //copy final flipped render target to the main cubemap
+            Graphics.CopyTexture(flippedCameraRender, 0, 0, finalCubemap, 0, 0);
 
             //X Negative (X-)
-            probeCameraGameObject.transform.rotation = Quaternion.LookRotation(Vector3.left, Vector3.up);
+            //rotate and render view
+            probeCameraGameObject.transform.rotation = probeCameraRotationXNEG;
             probeCamera.Render();
-            cubemapRenderingCompute.SetInt("CubemapFaceIndex", 1);
-            cubemapRenderingCompute.SetInt("CubemapFaceResolution", reflectionProbe.resolution);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "SceneRender", probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "CubemapResult", cubemapRender);
-            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, Mathf.CeilToInt(cubemapRender.width / computeShaderThreadGroupSizeX), Mathf.CeilToInt(cubemapRender.width / computeShaderThreadGroupSizeY), 1);
+
+            //flip render target
+            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Input, probeCameraRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Output, flippedCameraRender);
+            cubemapRenderingCompute.Dispatch(computeShaderKernelFlipRenderTarget, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
+
+            //copy final flipped render target to the main cubemap
+            Graphics.CopyTexture(flippedCameraRender, 0, 0, finalCubemap, 1, 0);
 
             //Y Positive (Y+)
-            probeCameraGameObject.transform.rotation = Quaternion.LookRotation(Vector3.up, Vector3.down);
+            //rotate and render view
+            probeCameraGameObject.transform.rotation = probeCameraRotationYPOS;
             probeCamera.Render();
-            cubemapRenderingCompute.SetInt("CubemapFaceIndex", 2);
-            cubemapRenderingCompute.SetInt("CubemapFaceResolution", reflectionProbe.resolution);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "SceneRender", probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "CubemapResult", cubemapRender);
-            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, Mathf.CeilToInt(cubemapRender.width / computeShaderThreadGroupSizeX), Mathf.CeilToInt(cubemapRender.width / computeShaderThreadGroupSizeY), 1);
+
+            //flip render target
+            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Input, probeCameraRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Output, flippedCameraRender);
+            cubemapRenderingCompute.Dispatch(computeShaderKernelFlipRenderTarget, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
+
+            //copy final flipped render target to the main cubemap
+            Graphics.CopyTexture(flippedCameraRender, 0, 0, finalCubemap, 2, 0);
 
             //Y Negative (Y-)
-            probeCameraGameObject.transform.rotation = Quaternion.LookRotation(Vector3.down, Vector3.down);
+            //rotate and render view
+            probeCameraGameObject.transform.rotation = probeCameraRotationYNEG;
             probeCamera.Render();
-            cubemapRenderingCompute.SetInt("CubemapFaceIndex", 3);
-            cubemapRenderingCompute.SetInt("CubemapFaceResolution", reflectionProbe.resolution);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "SceneRender", probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "CubemapResult", cubemapRender);
-            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, Mathf.CeilToInt(cubemapRender.width / computeShaderThreadGroupSizeX), Mathf.CeilToInt(cubemapRender.width / computeShaderThreadGroupSizeY), 1);
+
+            //flip render target
+            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Input, probeCameraRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Output, flippedCameraRender);
+            cubemapRenderingCompute.Dispatch(computeShaderKernelFlipRenderTarget, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
+
+            //copy final flipped render target to the main cubemap
+            Graphics.CopyTexture(flippedCameraRender, 0, 0, finalCubemap, 3, 0);
 
             //Z Positive (Z+)
-            probeCameraGameObject.transform.rotation = Quaternion.LookRotation(Vector3.forward, Vector3.up);
+            //rotate and render view
+            probeCameraGameObject.transform.rotation = probeCameraRotationZPOS;
             probeCamera.Render();
-            cubemapRenderingCompute.SetInt("CubemapFaceIndex", 4);
-            cubemapRenderingCompute.SetInt("CubemapFaceResolution", reflectionProbe.resolution);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "SceneRender", probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "CubemapResult", cubemapRender);
-            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, Mathf.CeilToInt(cubemapRender.width / computeShaderThreadGroupSizeX), Mathf.CeilToInt(cubemapRender.width / computeShaderThreadGroupSizeY), 1);
+
+            //flip render target
+            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Input, probeCameraRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Output, flippedCameraRender);
+            cubemapRenderingCompute.Dispatch(computeShaderKernelFlipRenderTarget, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
+
+            //copy final flipped render target to the main cubemap
+            Graphics.CopyTexture(flippedCameraRender, 0, 0, finalCubemap, 4, 0);
 
             //Z Negative (Z-)
-            probeCameraGameObject.transform.rotation = Quaternion.LookRotation(Vector3.back, Vector3.up);
+            //rotate and render view
+            probeCameraGameObject.transform.rotation = probeCameraRotationZNEG;
             probeCamera.Render();
-            cubemapRenderingCompute.SetInt("CubemapFaceIndex", 5);
-            cubemapRenderingCompute.SetInt("CubemapFaceResolution", reflectionProbe.resolution);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "SceneRender", probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "CubemapResult", cubemapRender);
-            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, Mathf.CeilToInt(cubemapRender.width / computeShaderThreadGroupSizeX), Mathf.CeilToInt(cubemapRender.width / computeShaderThreadGroupSizeY), 1);
 
-            //|||||||||||||||||||||||||||||||||||||| CONVERT COMBINED CUBEMAP INTO ACTUAL USABLE CUBEMAP ||||||||||||||||||||||||||||||||||||||
-            //|||||||||||||||||||||||||||||||||||||| CONVERT COMBINED CUBEMAP INTO ACTUAL USABLE CUBEMAP ||||||||||||||||||||||||||||||||||||||
-            //|||||||||||||||||||||||||||||||||||||| CONVERT COMBINED CUBEMAP INTO ACTUAL USABLE CUBEMAP ||||||||||||||||||||||||||||||||||||||
+            //flip render target
+            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Input, probeCameraRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Output, flippedCameraRender);
+            cubemapRenderingCompute.Dispatch(computeShaderKernelFlipRenderTarget, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
-            //then to transfer the data as efficently as possible, we use Graphics.CopyTexture to copy each slice into the cubemap!
-            //after this then we have a render texture cubemap that we just wrote into!
-            Graphics.CopyTexture(cubemapRender, 0, 0, finalCubemap, 0, 0);
-            Graphics.CopyTexture(cubemapRender, 1, 0, finalCubemap, 1, 0);
-            Graphics.CopyTexture(cubemapRender, 2, 0, finalCubemap, 2, 0);
-            Graphics.CopyTexture(cubemapRender, 3, 0, finalCubemap, 3, 0);
-            Graphics.CopyTexture(cubemapRender, 4, 0, finalCubemap, 4, 0);
-            Graphics.CopyTexture(cubemapRender, 5, 0, finalCubemap, 5, 0);
+            //copy final flipped render target to the main cubemap
+            Graphics.CopyTexture(flippedCameraRender, 0, 0, finalCubemap, 5, 0);
 
             //generate mips so PBR shaders can sample a slightly blurrier version of the reflection cubemap
             //IMPORTANT NOTE: this is not PBR compliant, PBR shaders in unity (and most engines if configured as such) actually need a special mip map setup for reflection cubemaps (specular convolution)
@@ -312,12 +368,14 @@ namespace ImprovedCubemapRendering
             finalCubemap.GenerateMips();
 
             //update next time interval
-            nextUpdateInterval = Time.time + (1.0f / updateFPS);
+            //NOTE TO SELF: using Time.time in the long term might have precison issues later, would be prefered to switch this to double instead.
+            nextUpdateInterval = Time.time + updateTime;
         }
 
         //|||||||||||||||||||||||||||||||||||||| EDITOR ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| EDITOR ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| EDITOR ||||||||||||||||||||||||||||||||||||||
+#if UNITY_EDITOR
 
         [ContextMenu("RenderRealtimeCubemapOnce")]
         public void RenderRealtimeCubemapOnce()
@@ -341,6 +399,7 @@ namespace ImprovedCubemapRendering
             Cleanup();
         }
 
+#endif
         //|||||||||||||||||||||||||||||||||||||| RENDER TEXTURE FORMAT ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| RENDER TEXTURE FORMAT ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| RENDER TEXTURE FORMAT ||||||||||||||||||||||||||||||||||||||

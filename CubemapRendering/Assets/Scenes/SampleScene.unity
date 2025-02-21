@@ -19967,11 +19967,8 @@ GameObject:
   m_Component:
   - component: {fileID: 1771795922}
   - component: {fileID: 1771795921}
+  - component: {fileID: 1771795924}
   - component: {fileID: 1771795923}
-  - component: {fileID: 1771795926}
-  - component: {fileID: 1771795925}
-  - component: {fileID: 1771795927}
-  - component: {fileID: 1771795928}
   m_Layer: 0
   m_Name: Reflection Probe
   m_TagString: Untagged
@@ -20035,42 +20032,15 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1771795920}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 0d97436683b3632419b3738ae8b1b219, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  renderInHalfPrecison: 1
---- !u!114 &1771795925
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1771795920}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d2dc00ca95849344dbed3595c78def46, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  formatType: 0
-  updateFPS: 30
---- !u!114 &1771795926
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1771795920}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 123eef2cd8dadec4fb21cb2e05162786, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   cubemapRenderingCompute: {fileID: 7200000, guid: e692f6b6852459f49aa66b068eb75907, type: 3}
-  formatType: 0
+  formatType: 1
   updateFPS: 30
---- !u!114 &1771795927
+--- !u!114 &1771795924
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -20079,29 +20049,10 @@ MonoBehaviour:
   m_GameObject: {fileID: 1771795920}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 56bd10156daa1f8468fcc6a6cab6ac9a, type: 3}
+  m_Script: {fileID: 11500000, guid: 0d97436683b3632419b3738ae8b1b219, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  cubemapRenderingCompute: {fileID: 7200000, guid: 50062524891cada45a56ff2e3cdf4cbb, type: 3}
-  formatType: 2
-  updateFPS: 30
-  GGXSpecularConvolutionSamples: 256
---- !u!114 &1771795928
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1771795920}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 13d92dde518ca384eb8ba1c45b8a8899, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  cubemapRenderingCompute: {fileID: 7200000, guid: 9f1281bc3a0f7e74d94a983e3d3cdbb9, type: 3}
-  formatType: 1
-  updateFPS: 30
-  GGXSpecularConvolutionSamples: 256
+  renderInHalfPrecison: 0
 --- !u!1 &1791709132
 GameObject:
   m_ObjectHideFlags: 0
