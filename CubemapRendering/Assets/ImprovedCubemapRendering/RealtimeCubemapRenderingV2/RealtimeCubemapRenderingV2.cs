@@ -1,4 +1,6 @@
+#if UNITY_EDITOR
 using UnityEditor;
+#endif
 
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -42,21 +44,30 @@ namespace ImprovedCubemapRendering
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
 
-        private float nextUpdateInterval;
-
         private ReflectionProbe reflectionProbe;
-
-        private RenderTexture probeCameraRender;
-        private RenderTexture finalCubemap;
 
         private GameObject probeCameraGameObject;
         private Camera probeCamera;
 
-        private RenderTextureConverter renderTextureConverter;
+        //only two render targets needed!
+        //NOTE: we don't do specular convolution later
+        private RenderTexture probeCameraRender;
+        private RenderTexture finalCubemap;
 
         private static int renderTargetDepthBits = 32; //0 16 24 32
 
+        private Quaternion probeCameraRotationXPOS;
+        private Quaternion probeCameraRotationXNEG;
+        private Quaternion probeCameraRotationYPOS;
+        private Quaternion probeCameraRotationYNEG;
+        private Quaternion probeCameraRotationZPOS;
+        private Quaternion probeCameraRotationZNEG;
+
         private bool isSetup;
+        private bool isRealtimeRenderingSetup;
+
+        private float nextUpdateInterval;
+        private float updateTime;
 
         //|||||||||||||||||||||||||||||||||||||| UNITY ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| UNITY ||||||||||||||||||||||||||||||||||||||
@@ -89,10 +100,6 @@ namespace ImprovedCubemapRendering
         /// </summary>
         private void Setup()
         {
-            //setup our render texture converter class so we can convert render textures to texture2D objects efficently/easily
-            if (renderTextureConverter == null)
-                renderTextureConverter = new RenderTextureConverter();
-
             //get the main reflection probe
             reflectionProbe = GetComponent<ReflectionProbe>();
             reflectionProbe.mode = UnityEngine.Rendering.ReflectionProbeMode.Custom;
@@ -112,7 +119,21 @@ namespace ImprovedCubemapRendering
             probeCamera.backgroundColor = reflectionProbe.backgroundColor;
 
             //NOTE: To get around the alignment/orentation issues, the camera actually needs to have a flipped setup for reflections
+            //This will cause face to be inverted however when rendering, so later we use a bit of a janky "solution" to invert face culling when rendering the cubemaps
             probeCamera.projectionMatrix = probeCamera.projectionMatrix * Matrix4x4.Scale(new Vector3(1, -1, 1));
+
+            //precompute orientations (no reason to recompute these every frame, they won't change!)
+            probeCameraRotationXPOS = Quaternion.LookRotation(Vector3.right, Vector3.up);
+            probeCameraRotationXNEG = Quaternion.LookRotation(Vector3.left, Vector3.up);
+            probeCameraRotationYPOS = Quaternion.LookRotation(Vector3.up, Vector3.down);
+            probeCameraRotationYNEG = Quaternion.LookRotation(Vector3.down, Vector3.down);
+            probeCameraRotationZPOS = Quaternion.LookRotation(Vector3.forward, Vector3.up);
+            probeCameraRotationZNEG = Quaternion.LookRotation(Vector3.back, Vector3.up);
+
+            //even though the impact is likely negligible we will compute this once instead of having to do it every frame
+            updateTime = 1.0f / updateFPS;
+
+            isSetup = true;
         }
 
         /// <summary>
@@ -123,12 +144,15 @@ namespace ImprovedCubemapRendering
             //if we have these render targets still around, make sure we clean it up before we start
             CleanupRealtimeRendering();
 
+            //if we are not setup, then don't bother setting up the realtime rendering resources!
+            if (!isSetup)
+                return;
+
             //start with no reflection data in the scene (at least on meshes within bounds of this reflection probe)
             //NOTE: Not implemented here, but if you want multi-bounce static reflections, we could just feed the previous render target here and reflections will naturally get recursively captured.
             reflectionProbe.customBakedTexture = null;
 
-            //NOTE: This is a workaround since "RWTextureCube" objects don't exist in compute shaders, and we are working instead with a RWTexture2DArray with 6 elements.
-            //Most shaders in the scene will expect a cubemap sampler, so we will create another render texture, with the cube dimension.
+            //NOTE: This is our actual final cubemap, which in technical terms is a Tex2DArray with 6 slices, however we can't work with it or write to it in a compute shader.
             finalCubemap = new RenderTexture(reflectionProbe.resolution, reflectionProbe.resolution, renderTargetDepthBits, GetRenderTextureFormatType(formatType));
             finalCubemap.dimension = UnityEngine.Rendering.TextureDimension.Cube;
             finalCubemap.filterMode = FilterMode.Trilinear;
@@ -155,7 +179,7 @@ namespace ImprovedCubemapRendering
             reflectionProbe.customBakedTexture = finalCubemap;
 
             //we are setup now to start rendering!
-            isSetup = true;
+            isRealtimeRenderingSetup = true;
         }
 
         //|||||||||||||||||||||||||||||||||||||| CLEANUP ||||||||||||||||||||||||||||||||||||||
@@ -174,6 +198,8 @@ namespace ImprovedCubemapRendering
             //make sure these references are gone
             probeCameraGameObject = null;
             probeCamera = null;
+
+            isSetup = false;
         }
 
         /// <summary>
@@ -187,7 +213,7 @@ namespace ImprovedCubemapRendering
             if (finalCubemap != null && finalCubemap.IsCreated())
                 finalCubemap.Release();
 
-            isSetup = false;
+            isRealtimeRenderingSetup = false;
         }
 
         //|||||||||||||||||||||||||||||||||||||| RENDER REALTIME CUBEMAP ||||||||||||||||||||||||||||||||||||||
@@ -196,9 +222,11 @@ namespace ImprovedCubemapRendering
 
         public void RenderRealtimeCubemap()
         {
-            if (!isSetup)
+            //if we are not setup, we can't render!
+            if (!isSetup || !isRealtimeRenderingSetup)
                 return;
 
+            //if it's not our time to update, then don't render!
             if (Time.time < nextUpdateInterval)
                 return;
 
@@ -259,12 +287,14 @@ namespace ImprovedCubemapRendering
             GL.invertCulling = false;
 
             //update next time interval
-            nextUpdateInterval = Time.time + (1.0f / updateFPS);
+            //NOTE TO SELF: using Time.time in the long term might have precison issues later, would be prefered to switch this to double instead.
+            nextUpdateInterval = Time.time + updateTime;
         }
 
         //|||||||||||||||||||||||||||||||||||||| EDITOR ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| EDITOR ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| EDITOR ||||||||||||||||||||||||||||||||||||||
+#if UNITY_EDITOR
 
         [ContextMenu("RenderRealtimeCubemapOnce")]
         public void RenderRealtimeCubemapOnce()
@@ -288,6 +318,7 @@ namespace ImprovedCubemapRendering
             Cleanup();
         }
 
+#endif
         //|||||||||||||||||||||||||||||||||||||| RENDER TEXTURE FORMAT ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| RENDER TEXTURE FORMAT ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| RENDER TEXTURE FORMAT ||||||||||||||||||||||||||||||||||||||

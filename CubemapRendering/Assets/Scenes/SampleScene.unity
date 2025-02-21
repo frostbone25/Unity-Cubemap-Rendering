@@ -19969,6 +19969,7 @@ GameObject:
   - component: {fileID: 1771795921}
   - component: {fileID: 1771795924}
   - component: {fileID: 1771795923}
+  - component: {fileID: 1771795925}
   m_Layer: 0
   m_Name: Reflection Probe
   m_TagString: Untagged
@@ -19989,7 +19990,7 @@ ReflectionProbe:
   m_Mode: 2
   m_RefreshMode: 0
   m_TimeSlicingMode: 0
-  m_Resolution: 256
+  m_Resolution: 512
   m_UpdateFrequency: 0
   m_BoxSize: {x: 10, y: 10, z: 10}
   m_BoxOffset: {x: 0, y: 0, z: 0}
@@ -20032,7 +20033,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1771795920}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 123eef2cd8dadec4fb21cb2e05162786, type: 3}
   m_Name: 
@@ -20047,12 +20048,26 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1771795920}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0d97436683b3632419b3738ae8b1b219, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   renderInHalfPrecison: 0
+--- !u!114 &1771795925
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1771795920}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d2dc00ca95849344dbed3595c78def46, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  formatType: 1
+  updateFPS: 30
 --- !u!1 &1791709132
 GameObject:
   m_ObjectHideFlags: 0

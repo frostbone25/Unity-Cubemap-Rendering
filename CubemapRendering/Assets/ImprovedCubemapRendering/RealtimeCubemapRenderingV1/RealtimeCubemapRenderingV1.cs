@@ -1,5 +1,4 @@
 #if UNITY_EDITOR
-using System;
 using UnityEditor;
 #endif
 
@@ -166,6 +165,7 @@ namespace ImprovedCubemapRendering
             //if we have these render targets still around, make sure we clean it up before we start
             CleanupRealtimeRendering();
 
+            //if we are not setup, then don't bother setting up the realtime rendering resources!
             if (!isSetup)
                 return;
 
@@ -173,8 +173,7 @@ namespace ImprovedCubemapRendering
             //NOTE: Not implemented here, but if you want multi-bounce static reflections, we could just feed the previous render target here and reflections will naturally get recursively captured.
             reflectionProbe.customBakedTexture = null;
 
-            //NOTE: This is a workaround since "RWTextureCube" objects don't exist in compute shaders, and we are working instead with a RWTexture2DArray with 6 elements.
-            //Most shaders in the scene will expect a cubemap sampler, so we will create another render texture, with the cube dimension.
+            //NOTE: This is our actual final cubemap, which in technical terms is a Tex2DArray with 6 slices, however we can't work with it or write to it in a compute shader.
             finalCubemap = new RenderTexture(reflectionProbe.resolution, reflectionProbe.resolution, renderTargetDepthBits, GetRenderTextureFormatType(formatType));
             finalCubemap.dimension = UnityEngine.Rendering.TextureDimension.Cube;
             finalCubemap.filterMode = FilterMode.Trilinear;
@@ -270,7 +269,7 @@ namespace ImprovedCubemapRendering
         public void RenderRealtimeCubemap()
         {
             //if we are not setup, we can't render!
-            if (!isSetup)
+            if (!isSetup || !isRealtimeRenderingSetup)
                 return;
 
             //if it's not our time to update, then don't render!
