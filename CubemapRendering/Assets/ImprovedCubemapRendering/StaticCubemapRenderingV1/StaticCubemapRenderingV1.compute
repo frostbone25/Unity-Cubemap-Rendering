@@ -1,0 +1,411 @@
+#define THREAD_GROUP_SIZE_X 4
+#define THREAD_GROUP_SIZE_Y 4
+#define THREAD_GROUP_SIZE_Z 1
+
+int CubemapFaceIndex;
+int CubemapFaceResolution;
+
+int Samples;
+float Roughness;
+
+RWTexture2D<float4> SceneRender;
+
+//NOTE: There is no such thing as a RWTextureCube unfortunately...
+//So to make do, we use a texture2D array.
+RWTexture2DArray<float4> CubemapResult;
+
+//NOTE: There is no such thing as a RWTextureCube unfortunately...
+//So to make do, we use a texture2D array.
+RWTexture2DArray<float4> InputCubemap;
+
+#pragma kernel CubemapCombine
+[numthreads(THREAD_GROUP_SIZE_X, THREAD_GROUP_SIZE_Y, THREAD_GROUP_SIZE_Z)]
+void CubemapCombine(uint3 id : SV_DispatchThreadID)
+{
+    //CubemapResult[uint3(id.xy, CubemapFaceIndex)] = SceneRender[id.xy];
+    //CubemapResult[uint3(id.xy, CubemapFaceIndex)] = SceneRender[uint2(CubemapFaceResolution, CubemapFaceResolution) - id.xy];
+    CubemapResult[uint3(id.xy, CubemapFaceIndex)] = SceneRender[uint2(id.x, CubemapFaceResolution - id.y)];
+}
+
+//||||||||||||||||||||||||| GGX SPECULAR CONVOLUTION |||||||||||||||||||||||||
+//||||||||||||||||||||||||| GGX SPECULAR CONVOLUTION |||||||||||||||||||||||||
+//||||||||||||||||||||||||| GGX SPECULAR CONVOLUTION |||||||||||||||||||||||||
+
+const float PI = 3.14159265359;
+
+// ----------------------------------------------------------------------------
+float DistributionGGX(float3 N, float3 H, float roughness)
+{
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float NdotH = max(dot(N, H), 0.0);
+    float NdotH2 = NdotH * NdotH;
+
+    float nom = a2;
+    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
+    denom = PI * denom * denom;
+
+    return nom / denom;
+}
+// ----------------------------------------------------------------------------
+// http://holger.dammertz.org/stuff/notes_HammersleyOnHemisphere.html
+// efficient VanDerCorpus calculation.
+float RadicalInverse_VdC(uint bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return float(bits) * 2.3283064365386963e-10; // / 0x100000000
+}
+// ----------------------------------------------------------------------------
+float2 Hammersley(uint i, uint N)
+{
+    return float2(float(i) / float(N), RadicalInverse_VdC(i));
+}
+// ----------------------------------------------------------------------------
+float3 ImportanceSampleGGX(float2 Xi, float3 N, float roughness)
+{
+    float a = roughness * roughness;
+	
+    float phi = 2.0 * PI * Xi.x;
+    float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a * a - 1.0) * Xi.y));
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+	
+	// from spherical coordinates to cartesian coordinates - halfway vector
+    float3 H;
+    H.x = cos(phi) * sinTheta;
+    H.y = sin(phi) * sinTheta;
+    H.z = cosTheta;
+	
+	// from tangent-space H vector to world-space sample vector
+    float3 up = abs(N.z) < 0.999 ? float3(0.0, 0.0, 1.0) : float3(1.0, 0.0, 0.0);
+    float3 tangent = normalize(cross(up, N));
+    float3 bitangent = cross(N, tangent);
+	
+    float3 sampleVec = tangent * H.x + bitangent * H.y + N * H.z;
+    return normalize(sampleVec);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+#define UNITY_PI            3.14159265359f
+
+//||||||||||||||||||||||||||||| UTILITY FUNCTIONS |||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||| UTILITY FUNCTIONS |||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||| UTILITY FUNCTIONS |||||||||||||||||||||||||||||
+
+//https://github.com/Unity-Technologies/Graphics/blob/master/Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl
+uint BitFieldInsert(uint mask, uint src, uint dst)
+{
+    return (src & mask) | (dst & ~mask);
+}
+
+float CopySign(float x, float s, bool ignoreNegZero = true)
+{
+    if (ignoreNegZero)
+    {
+        return (s >= 0) ? abs(x) : -abs(x);
+    }
+    else
+    {
+        uint negZero = 0x80000000u;
+        uint signBit = negZero & asuint(s);
+        return asfloat(BitFieldInsert(negZero, signBit, asuint(x)));
+    }
+}
+
+float FastSign(float s, bool ignoreNegZero = true)
+{
+    return CopySign(1.0, s, ignoreNegZero);
+}
+
+//https://github.com/Unity-Technologies/Graphics/blob/master/Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl
+float3x3 GetLocalFrame(float3 localZ)
+{
+    float x = localZ.x;
+    float y = localZ.y;
+    float z = localZ.z;
+    float sz = FastSign(z);
+    float a = 1 / (sz + z);
+    float ya = y * a;
+    float b = x * ya;
+    float c = x * sz;
+
+    float3 localX = float3(c * x * a - 1, sz * b, c);
+    float3 localY = float3(b, y * ya - sz, y);
+
+    return float3x3(localX, localY, localZ);
+}
+
+//||||||||||||||||||||||||||||| PBR SHADING FUNCTIONS |||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||| PBR SHADING FUNCTIONS |||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||| PBR SHADING FUNCTIONS |||||||||||||||||||||||||||||
+
+void SampleAnisoGGXVisibleNormal(float2 u,
+                float3 V,
+                float3x3 localToWorld,
+                float roughnessX,
+                float roughnessY,
+                out float3 localV,
+                out float3 localH,
+                out float VdotH)
+{
+    localV = mul(V, transpose(localToWorld));
+
+    // Construct an orthonormal basis around the stretched view direction
+    float3 N = normalize(float3(roughnessX * localV.x, roughnessY * localV.y, localV.z));
+    float3 T = (N.z < 0.9999) ? normalize(cross(float3(0, 0, 1), N)) : float3(1, 0, 0);
+    float3 B = cross(N, T);
+
+    // Compute a sample point with polar coordinates (r, phi)
+    float r = sqrt(u.x);
+    float phi = 2.0 * UNITY_PI * u.y;
+    float t1 = r * cos(phi);
+    float t2 = r * sin(phi);
+    float s = 0.5 * (1.0 + N.z);
+    t2 = (1.0 - s) * sqrt(1.0 - t1 * t1) + s * t2;
+
+    // Reproject onto hemisphere
+    localH = t1 * T + t2 * B + sqrt(max(0.0, 1.0 - t1 * t1 - t2 * t2)) * N;
+
+    // Transform the normal back to the ellipsoid configuration
+    localH = normalize(float3(roughnessX * localH.x, roughnessY * localH.y, max(0.0, localH.z)));
+
+    VdotH = saturate(dot(localV, localH));
+}
+
+// GGX VNDF via importance sampling
+half3 ImportanceSampleGGX_VNDF(float2 random, half3 normalWS, half3 viewDirWS, half roughness, out bool valid)
+{
+    half3x3 localToWorld = GetLocalFrame(normalWS);
+
+    half VdotH;
+    half3 localV, localH;
+    SampleAnisoGGXVisibleNormal(random, viewDirWS, localToWorld, roughness, roughness, localV, localH, VdotH);
+
+    // Compute the reflection direction
+    half3 localL = 2.0 * VdotH * localH - localV;
+    half3 outgoingDir = mul(localL, localToWorld);
+
+    half NdotL = dot(normalWS, outgoingDir);
+
+    valid = (NdotL >= 0.001);
+
+    return outgoingDir;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+// Map cubemap face to world vector basis
+static const float3 CUBEMAP_FACE_BASIS_MAPPING[6][3] =
+{
+    //XPOS face
+    {
+        float3(0.0, 0.0, -1.0),
+        float3(0.0, -1.0, 0.0),
+        float3(1.0, 0.0, 0.0)
+    },
+    //XNEG face
+    {
+        float3(0.0, 0.0, 1.0),
+        float3(0.0, -1.0, 0.0),
+        float3(-1.0, 0.0, 0.0)
+    },
+    //YPOS face
+    {
+        float3(1.0, 0.0, 0.0),
+        float3(0.0, 0.0, 1.0),
+        float3(0.0, 1.0, 0.0)
+    },
+    //YNEG face
+    {
+        float3(1.0, 0.0, 0.0),
+        float3(0.0, 0.0, -1.0),
+        float3(0.0, -1.0, 0.0)
+    },
+    //ZPOS face
+    {
+        float3(1.0, 0.0, 0.0),
+        float3(0.0, -1.0, 0.0),
+        float3(0.0, 0.0, 1.0)
+    },
+    //ZNEG face
+    {
+        float3(-1.0, 0.0, 0.0),
+        float3(0.0, -1.0, 0.0),
+        float3(0.0, 0.0, -1.0)
+    }
+};
+
+// Convert a normalized cubemap face position into a direction
+float3 CubemapTexelToDirection(float2 positionNVC, uint faceId)
+{
+    float3 dir = CUBEMAP_FACE_BASIS_MAPPING[faceId][0] * positionNVC.x
+               + CUBEMAP_FACE_BASIS_MAPPING[faceId][1] * positionNVC.y
+               + CUBEMAP_FACE_BASIS_MAPPING[faceId][2];
+
+    return normalize(dir);
+}
+*/
+
+///*
+//NOTE TO SELF: This is correct, verified with a ground truth ray direction capture
+float3 CubemapTexelToDirection(float2 positionNVC, uint faceId)
+{
+    float3 dir = float3(0, 0, 0);
+    
+    switch (faceId)
+    {
+        case 0: //XPOS face
+            dir = float3(0.0, 0.0, -1.0) * positionNVC.x + float3(0.0, -1.0, 0.0) * positionNVC.y + float3(1.0, 0.0, 0.0);
+            break;
+        case 1: //XNEG face
+            dir = float3(0.0, 0.0, 1.0) * positionNVC.x + float3(0.0, -1.0, 0.0) * positionNVC.y + float3(-1.0, 0.0, 0.0);
+            break;
+        case 2: //YPOS face
+            dir = float3(1.0, 0.0, 0.0) * positionNVC.x + float3(0.0, 0.0, 1.0) * positionNVC.y + float3(0.0, 1.0, 0.0);
+            break;
+        case 3: //YNEG face
+            dir = float3(1.0, 0.0, 0.0) * positionNVC.x + float3(0.0, 0.0, -1.0) * positionNVC.y + float3(0.0, -1.0, 0.0);
+            break;
+        case 4: //ZPOS face
+            dir = float3(1.0, 0.0, 0.0) * positionNVC.x + float3(0.0, -1.0, 0.0) * positionNVC.y + float3(0.0, 0.0, 1.0);
+            break;
+        case 5: //ZNEG face
+            dir = float3(-1.0, 0.0, 0.0) * positionNVC.x + float3(0.0, -1.0, 0.0) * positionNVC.y + float3(0.0, 0.0, -1.0);
+            break;
+    }
+    
+    return normalize(dir);
+}
+//*/
+
+uint3 RayDirectionToCubemapTexel(float3 direction)
+{
+    uint faceId = 0;
+    float2 texelCoord = float2(0.0, 0.0);
+    
+    // Determine which face the direction vector points to
+    if (abs(direction.x) >= abs(direction.y) && abs(direction.x) >= abs(direction.z))
+    {
+        // X face
+        if (direction.x > 0.0)
+        {
+            faceId = 0; // XPOS face
+            texelCoord = float2(direction.z, direction.y) / direction.x * 0.5 + 0.5;
+            texelCoord.x = 1 - texelCoord.x;
+            texelCoord.y = 1 - texelCoord.y;
+        }
+        else
+        {
+            faceId = 1; // XNEG face
+            texelCoord = float2(-direction.z, direction.y) / -direction.x * 0.5 + 0.5;
+            texelCoord.x = 1 - texelCoord.x;
+            texelCoord.y = 1 - texelCoord.y;
+        }
+    }
+    else if (abs(direction.y) >= abs(direction.x) && abs(direction.y) >= abs(direction.z))
+    {
+        // Y face
+        if (direction.y > 0.0)
+        {
+            faceId = 2; // YPOS face
+            texelCoord = float2(direction.x, direction.z) / direction.y * 0.5 + 0.5;
+        }
+        else
+        {
+            faceId = 3; // YNEG face
+            texelCoord = float2(direction.x, -direction.z) / -direction.y * 0.5 + 0.5;
+        }
+    }
+    else
+    {
+        // Z face
+        if (direction.z > 0.0)
+        {
+            faceId = 4; // ZPOS face
+            texelCoord = float2(direction.x, direction.y) / direction.z * 0.5 + 0.5;
+            texelCoord.y = 1 - texelCoord.y;
+
+        }
+        else
+        {
+            faceId = 5; // ZNEG face
+            texelCoord = float2(-direction.x, direction.y) / -direction.z * 0.5 + 0.5;
+            texelCoord.y = 1 - texelCoord.y;
+        }
+    }
+    
+    // Clamp texel coordinates to ensure they're within [0, 1]
+    texelCoord = saturate(texelCoord);
+    
+    // Return texel coordinates as uint3 (texelCoord, faceId)
+    return uint3(texelCoord * CubemapFaceResolution, faceId);
+}
+
+#pragma kernel ConvolveSpecularGGX
+[numthreads(THREAD_GROUP_SIZE_X, THREAD_GROUP_SIZE_Y, THREAD_GROUP_SIZE_Z)]
+void ConvolveSpecularGGX(uint3 id : SV_DispatchThreadID)
+{
+    //NOTE TO SELF: The 0.5f offsets here are CRITICAL when computing normalized UVs in a compute shader
+    float2 normalizedUV = float2(id.x + 0.5f, id.y + 0.5f) / CubemapFaceResolution;
+    //normalizedUV.y = 1 - normalizedUV.y;
+    //normalizedUV.x = 1 - normalizedUV.x;
+    
+    float2 signedUV = normalizedUV * 2.0f - 1.0f;
+    
+    float3 rayDirection = CubemapTexelToDirection(signedUV, CubemapFaceIndex);
+    
+    //checking if CubemapTexelToDirection is correct.
+    //NOTE TO SELF: They both are
+    //CubemapResult[uint3(id.xy, CubemapFaceIndex)] = float4(rayDirection, 1);
+    //return;
+    
+    float4 result = float4(0, 0, 0, 0);
+    
+    for (int i = 0; i < Samples; i++)
+    {
+        float2 sampleSet = Hammersley(i, Samples);
+
+        float valid = true;
+        //float3 specularRayDirection = ImportanceSampleGGX(sampleSet, rayDirection, Roughness);
+        float3 specularRayDirection = ImportanceSampleGGX_VNDF(sampleSet, rayDirection, rayDirection, Roughness, valid);
+
+        //NOTE: this function is now correct
+        uint3 textureSampleCoords = RayDirectionToCubemapTexel(specularRayDirection);
+        //uint3 textureSampleCoords = RayDirectionToCubemapTexel(rayDirection);
+        
+        result += InputCubemap[textureSampleCoords];
+    }
+    
+    result /= Samples;
+    
+    CubemapResult[uint3(id.xy, CubemapFaceIndex)] = result;
+    //CubemapResult[uint3(id.xy, CubemapFaceIndex)] = float4(1, 1, 1, 1);
+}
