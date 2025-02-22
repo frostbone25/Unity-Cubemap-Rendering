@@ -59,6 +59,7 @@ namespace ImprovedCubemapRendering
 
         [Header("Properties")]
         public RealtimeCubemapTextureFormatType formatType = RealtimeCubemapTextureFormatType.RGBAHalf;
+        public bool update = true;
         public int updateFPS = 30;
         public int GGXSpecularConvolutionSamples = 256;
 
@@ -227,11 +228,11 @@ namespace ImprovedCubemapRendering
             //the nature of this also being realtime means that we will recursively get reflection bounces anyway for free!
             reflectionProbe.customBakedTexture = finalCubemap;
 
-            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER / MISC ||||||||||||||||||||||||||||||||||||||
-            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER / MISC ||||||||||||||||||||||||||||||||||||||
-            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER / MISC ||||||||||||||||||||||||||||||||||||||
-
+            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER ||||||||||||||||||||||||||||||||||||||
             //get some data from the compute shader once (they don't change, no reason to get them every frame anyway)
+
             computeShaderKernelCubemapCombine = cubemapRenderingCompute.FindKernel("CubemapCombine");
             computeShaderKernelConvolveSpecularGGX = cubemapRenderingCompute.FindKernel("ConvolveSpecularGGX");
             cubemapRenderingCompute.GetKernelThreadGroupSizes(computeShaderKernelCubemapCombine, out uint threadGroupSizeX, out uint threadGroupSizeY, out uint threadGroupSizeZ);
@@ -239,10 +240,13 @@ namespace ImprovedCubemapRendering
             computeShaderThreadGroupSizeY = Mathf.CeilToInt(intermediateCubemap.height / threadGroupSizeY);
             computeShaderThreadGroupSizeZ = (int)threadGroupSizeZ;
 
+            //|||||||||||||||||||||||||||||||||||||| SETUP - SPECULAR CONVOLUTION TERMS ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - SPECULAR CONVOLUTION TERMS ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - SPECULAR CONVOLUTION TERMS ||||||||||||||||||||||||||||||||||||||
             //NOTE: here we precompute a number of variables ahead of time that don't need to be updated every frame
             //This pertains to the mip levels that we sample/modify later when doing specular convolution
 
-            //calculate amount of 
+            //calculate amount of mips a texture with the reflection probe resolution ought to have
             int mipCount = (int)Mathf.Log(reflectionProbe.resolution, 2);
             int mipLevelResolution = reflectionProbe.resolution;
 
@@ -266,6 +270,10 @@ namespace ImprovedCubemapRendering
 
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapFaceResolution, reflectionProbe.resolution);
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.SpecularConvolutionSamples, GGXSpecularConvolutionSamples);
+
+            //|||||||||||||||||||||||||||||||||||||| SETUP - MISC ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - MISC ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - MISC ||||||||||||||||||||||||||||||||||||||
 
             //even though the impact is likely negligible we will compute this once instead of having to do it every frame
             updateTime = 1.0f / updateFPS;
@@ -318,7 +326,7 @@ namespace ImprovedCubemapRendering
                 return;
 
             //if it's not our time to update, then don't render!
-            if (Time.time < nextUpdateInterval)
+            if (Time.time < nextUpdateInterval && update)
                 return;
 
             //|||||||||||||||||||||||||||||||||||||| RENDER CUBEMAP FACES ||||||||||||||||||||||||||||||||||||||
@@ -403,8 +411,8 @@ namespace ImprovedCubemapRendering
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
 
-            // Transfer mip 0 (this is done separately from the loop below as we do not want to blur it)
-            // this saves us a little extra work since the first mip level should be the original reflection
+            //transfer mip 0 (this is done separately from the loop below as we do not want to blur it)
+            //this saves us a little extra work since the first mip level should be the original reflection
             for (int face = 0; face < 6; face++)
             {
                 Graphics.CopyTexture(intermediateCubemap, face, 0, convolvedCubemap, face, 0);

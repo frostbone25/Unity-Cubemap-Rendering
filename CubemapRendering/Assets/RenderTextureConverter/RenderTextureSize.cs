@@ -97,6 +97,10 @@ public static class RenderTextureSize
                 renderTextureDataSize = (ulong)(renderTexture.width * renderTexture.height * renderTexture.volumeDepth);
                 break;
 
+            case UnityEngine.Rendering.TextureDimension.Tex2DArray:
+                renderTextureDataSize = (ulong)(renderTexture.width * renderTexture.height * renderTexture.volumeDepth);
+                break;
+
             default:
                 renderTextureDataSize = (ulong)(renderTexture.width * renderTexture.height);
                 break;

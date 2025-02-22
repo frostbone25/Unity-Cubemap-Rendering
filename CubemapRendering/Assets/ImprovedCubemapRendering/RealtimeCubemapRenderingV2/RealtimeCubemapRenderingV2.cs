@@ -38,6 +38,7 @@ namespace ImprovedCubemapRendering
 
         [Header("Properties")]
         public RealtimeCubemapTextureFormatType formatType = RealtimeCubemapTextureFormatType.RGBAHalf;
+        public bool update = true;
         public int updateFPS = 30;
 
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
@@ -228,7 +229,7 @@ namespace ImprovedCubemapRendering
                 return;
 
             //if it's not our time to update, then don't render!
-            if (Time.time < nextUpdateInterval)
+            if (Time.time < nextUpdateInterval && update)
                 return;
 
             //SELF NOTE: I don't like this at all, because this changes it for the entire scene too (all of the cameras in it) if you don't switch it back.

@@ -1,10 +1,13 @@
 using System.Collections.Generic;
-using Unity.VisualScripting;
+
+#if UNITY_EDITOR
 using UnityEditor;
+#endif
 
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
+using static ImprovedCubemapRendering.RealtimeCubemapRenderingV4;
 
 //https://discussions.unity.com/t/specular-convolution-when-calculating-mip-maps-for-cubemap-render-texture/729652/15
 
@@ -35,6 +38,21 @@ namespace ImprovedCubemapRendering
             RGBA8
         }
 
+        public struct MipLevel
+        {
+            public int mipLevelSquareResolution;
+            public float roughnessLevel;
+            public int computeShaderKernelThreadGroupSizeX;
+            public int computeShaderKernelThreadGroupSizeY;
+            public int computeShaderKernelThreadGroupSizeZ;
+        }
+
+        public class SceneMesh
+        {
+            public Mesh mesh;
+            public Matrix4x4 localToWorldMatrix;
+        }
+
         //|||||||||||||||||||||||||||||||||||||| PUBLIC VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PUBLIC VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PUBLIC VARIABLES ||||||||||||||||||||||||||||||||||||||
@@ -42,8 +60,17 @@ namespace ImprovedCubemapRendering
         [Header("Setup")]
         public ComputeShader cubemapRenderingCompute;
 
+        [Header("Precomputation")]
+        public Texture2D skyboxVisibilityXPOS;
+        public Texture2D skyboxVisibilityXNEG;
+        public Texture2D skyboxVisibilityYPOS;
+        public Texture2D skyboxVisibilityYNEG;
+        public Texture2D skyboxVisibilityZPOS;
+        public Texture2D skyboxVisibilityZNEG;
+
         [Header("Properties")]
         public RealtimeCubemapTextureFormatType formatType = RealtimeCubemapTextureFormatType.RGBAHalf;
+        public bool update = true;
         public int updateFPS = 30;
         public int GGXSpecularConvolutionSamples = 256;
 
@@ -51,58 +78,48 @@ namespace ImprovedCubemapRendering
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
 
-        private float nextUpdateInterval;
-
         private ReflectionProbe reflectionProbe;
 
-        private RenderTexture probeCameraRender;
-        private RenderTexture rawCubemap;
+        //NOTE: I would like to explore potentially using less render textures here to save on memory
+        //whittling it down to atleast 2 would be ideal (camera render target, cubemap)
+        private RenderTexture cubemapFaceRender;
+        private RenderTexture intermediateCubemap;
         private RenderTexture convolvedCubemap;
         private RenderTexture finalCubemap;
-
-        private GameObject probeCameraGameObject;
-        private Camera probeCamera;
-
-        private Shader blackObjectShader => Shader.Find("RealtimeCubemapRenderingV4/BlackObject");
-        private Material blackObjectMaterial;
-
-        private RenderTextureConverter renderTextureConverter;
+        private Rect cubemapFaceRenderViewport;
 
         private static int renderTargetDepthBits = 32; //0 16 24 32
 
+        private RenderTextureFormat skyboxVisibilityFormat = RenderTextureFormat.R8;
+
         private int computeShaderKernelCubemapCombine;
         private int computeShaderKernelConvolveSpecularGGX;
-        private uint computeShaderThreadGroupSizeX = 0;
-        private uint computeShaderThreadGroupSizeY = 0;
-        private uint computeShaderThreadGroupSizeZ = 0;
-
-        private bool isSetup;
+        private int computeShaderThreadGroupSizeX = 0;
+        private int computeShaderThreadGroupSizeY = 0;
+        private int computeShaderThreadGroupSizeZ = 0;
 
         private Mesh skyboxMesh;
 
-        private CommandBuffer reflectionProbeCommandBuffer;
+        private CommandBuffer realtimeSkyboxCommandBuffer;
 
-        private List<ObjectBuffer> objectBuffers;
+        private Matrix4x4 realtimeSkyboxMeshTransformMatrix;
+        private Matrix4x4 realtimeSkyboxScaleMatrix;
+        private Matrix4x4 realtimeSkyboxCameraProjection;
+        private Matrix4x4 realtimeSkyboxViewPosition_XPOS;
+        private Matrix4x4 realtimeSkyboxViewPosition_XNEG;
+        private Matrix4x4 realtimeSkyboxViewPosition_YPOS;
+        private Matrix4x4 realtimeSkyboxViewPosition_YNEG;
+        private Matrix4x4 realtimeSkyboxViewPosition_ZPOS;
+        private Matrix4x4 realtimeSkyboxViewPosition_ZNEG;
 
-        private Matrix4x4 projectionMatrix;
+        private MipLevel[] specularConvolutionMipLevels;
 
-        private Matrix4x4 viewMatrixXPOS;
-        private Plane[] frustumPlanesXPOS;
+        private Shader blackObjectShader => Shader.Find("RealtimeCubemapRenderingV4/BlackObject");
 
-        private Matrix4x4 viewMatrixXNEG;
-        private Plane[] frustumPlanesXNEG;
+        private bool isSetup;
 
-        private Matrix4x4 viewMatrixYPOS;
-        private Plane[] frustumPlanesYPOS;
-
-        private Matrix4x4 viewMatrixYNEG;
-        private Plane[] frustumPlanesYNEG;
-
-        private Matrix4x4 viewMatrixZPOS;
-        private Plane[] frustumPlanesZPOS;
-
-        private Matrix4x4 viewMatrixZNEG;
-        private Plane[] frustumPlanesZNEG;
+        private float nextUpdateInterval;
+        private float updateTime;
 
         //|||||||||||||||||||||||||||||||||||||| UNITY ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| UNITY ||||||||||||||||||||||||||||||||||||||
@@ -139,55 +156,45 @@ namespace ImprovedCubemapRendering
             reflectionProbe = GetComponent<ReflectionProbe>();
             reflectionProbe.mode = UnityEngine.Rendering.ReflectionProbeMode.Custom;
 
-            //setup our render texture converter class so we can convert render textures to texture2D objects efficently/easily
-            if (renderTextureConverter == null)
-                renderTextureConverter = new RenderTextureConverter();
-
+#if UNITY_EDITOR
             //get our compute shader manually if for whatever reason it wasn't assigned
             if (cubemapRenderingCompute == null)
-                cubemapRenderingCompute = AssetDatabase.LoadAssetAtPath<ComputeShader>("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV3/RealtimeCubemapRenderingV3.compute");
+                cubemapRenderingCompute = AssetDatabase.LoadAssetAtPath<ComputeShader>("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV4/RealtimeCubemapRenderingV4.compute");
+#endif
 
-            blackObjectMaterial = new Material(blackObjectShader);
+            //if there is no compute shader period, we are in trouble and we can't continue!
+            //the compute shader is needed so we can flip the render target so that the faces show up correctly on the final cubemap!
+            if (cubemapRenderingCompute == null)
+            {
+                isSetup = false;
+                return;
+            }
 
-            //get some data from the compute shader once (they don't change, no reason to get them every frame anyway)
-            computeShaderKernelCubemapCombine = cubemapRenderingCompute.FindKernel("CubemapCombine");
-            computeShaderKernelConvolveSpecularGGX = cubemapRenderingCompute.FindKernel("ConvolveSpecularGGX");
-            cubemapRenderingCompute.GetKernelThreadGroupSizes(computeShaderKernelCubemapCombine, out computeShaderThreadGroupSizeX, out computeShaderThreadGroupSizeY, out computeShaderThreadGroupSizeZ);
-            cubemapRenderingCompute.SetInt("CubemapFaceResolution", reflectionProbe.resolution);
-            cubemapRenderingCompute.SetInt("Samples", GGXSpecularConvolutionSamples);
+            //|||||||||||||||||||||||||||||||||||||| SETUP - RENDER TARGETS ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - RENDER TARGETS ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - RENDER TARGETS ||||||||||||||||||||||||||||||||||||||
 
-            //setup main gameobject that will hold our camera that will render the scene
-            //and make sure it's placed right where the reflection probe capture point is supposed to be
-            probeCameraGameObject = new GameObject("probeCameraGameObject");
-            probeCameraGameObject.transform.position = reflectionProbe.transform.position;
-            probeCameraGameObject.transform.position += reflectionProbe.center;
-
-            //add the camera and match all of the coresponding settings from the reflection probe to our camera
-            probeCamera = probeCameraGameObject.AddComponent<Camera>();
-            probeCamera.fieldOfView = 90.0f; //90 degree FOV is important and required to render each of the 6 faces
-            probeCamera.nearClipPlane = reflectionProbe.nearClipPlane;
-            probeCamera.farClipPlane = reflectionProbe.farClipPlane;
-            probeCamera.backgroundColor = reflectionProbe.backgroundColor;
+            realtimeSkyboxCommandBuffer = new CommandBuffer();
 
             //create a regular 2D render target for the camera
-            probeCameraRender = new RenderTexture(reflectionProbe.resolution, reflectionProbe.resolution, renderTargetDepthBits, GetRenderTextureFormatType(formatType));
-            probeCameraRender.filterMode = FilterMode.Trilinear;
-            probeCameraRender.wrapMode = TextureWrapMode.Clamp;
-            probeCameraRender.enableRandomWrite = true;
-            probeCameraRender.isPowerOfTwo = true;
-            probeCameraRender.Create();
+            cubemapFaceRender = new RenderTexture(reflectionProbe.resolution, reflectionProbe.resolution, renderTargetDepthBits, GetRenderTextureFormatType(formatType));
+            cubemapFaceRender.filterMode = FilterMode.Trilinear;
+            cubemapFaceRender.wrapMode = TextureWrapMode.Clamp;
+            cubemapFaceRender.enableRandomWrite = true;
+            cubemapFaceRender.isPowerOfTwo = true;
+            cubemapFaceRender.Create();
 
             //NOTE: Since there is no native "RWTextureCube" we use a Tex2DArray with 6 slices which is similar to a cubemap setup.
-            rawCubemap = new RenderTexture(reflectionProbe.resolution, reflectionProbe.resolution, renderTargetDepthBits, GetRenderTextureFormatType(formatType));
-            rawCubemap.filterMode = FilterMode.Trilinear;
-            rawCubemap.wrapMode = TextureWrapMode.Clamp;
-            rawCubemap.volumeDepth = 6; //6 faces in cubemap
-            rawCubemap.dimension = UnityEngine.Rendering.TextureDimension.Tex2DArray;
-            rawCubemap.enableRandomWrite = true;
-            rawCubemap.isPowerOfTwo = true;
-            rawCubemap.useMipMap = true;
-            rawCubemap.autoGenerateMips = false;
-            rawCubemap.Create();
+            intermediateCubemap = new RenderTexture(reflectionProbe.resolution, reflectionProbe.resolution, renderTargetDepthBits, GetRenderTextureFormatType(formatType));
+            intermediateCubemap.filterMode = FilterMode.Trilinear;
+            intermediateCubemap.wrapMode = TextureWrapMode.Clamp;
+            intermediateCubemap.volumeDepth = 6; //6 faces in cubemap
+            intermediateCubemap.dimension = UnityEngine.Rendering.TextureDimension.Tex2DArray;
+            intermediateCubemap.enableRandomWrite = true;
+            intermediateCubemap.isPowerOfTwo = true;
+            intermediateCubemap.useMipMap = true;
+            intermediateCubemap.autoGenerateMips = false;
+            intermediateCubemap.Create();
 
             //NOTE: Since there is no native "RWTextureCube" we use a Tex2DArray with 6 slices which is similar to a cubemap setup.
             convolvedCubemap = new RenderTexture(reflectionProbe.resolution, reflectionProbe.resolution, renderTargetDepthBits, GetRenderTextureFormatType(formatType));
@@ -213,120 +220,85 @@ namespace ImprovedCubemapRendering
             finalCubemap.autoGenerateMips = false;
             finalCubemap.Create();
 
-            //feed the camera our render target so whatever it renders goes into our own render target
-            probeCamera.targetTexture = probeCameraRender;
+            //setup rect for the viewport later
+            cubemapFaceRenderViewport = new Rect(0, 0, cubemapFaceRender.width, cubemapFaceRender.height);
 
             //feed the reflection probe our final cubemap also (which will be updated)
             //the nature of this also being realtime means that we will recursively get reflection bounces anyway for free!
             reflectionProbe.customBakedTexture = finalCubemap;
 
+            //|||||||||||||||||||||||||||||||||||||| SETUP - MATRICES ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - MATRICES ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - MATRICES ||||||||||||||||||||||||||||||||||||||
+            //setup a number of matrices ahead of time (they don't change, no reason to update for every frame)
 
+            realtimeSkyboxScaleMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(1, -1, -1));
+            realtimeSkyboxCameraProjection = Matrix4x4.Perspective(90.0f, 1.0f, reflectionProbe.nearClipPlane, reflectionProbe.farClipPlane);
+            realtimeSkyboxMeshTransformMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, Vector3.one * (reflectionProbe.farClipPlane * 0.5f));
+            realtimeSkyboxViewPosition_XPOS = realtimeSkyboxScaleMatrix * Matrix4x4.LookAt(Vector3.zero, Vector3.left, Vector3.up);
+            realtimeSkyboxViewPosition_XNEG = realtimeSkyboxScaleMatrix * Matrix4x4.LookAt(Vector3.zero, Vector3.right, Vector3.up);
+            realtimeSkyboxViewPosition_YPOS = realtimeSkyboxScaleMatrix * Matrix4x4.LookAt(Vector3.zero, Vector3.down, Vector3.forward);
+            realtimeSkyboxViewPosition_YNEG = realtimeSkyboxScaleMatrix * Matrix4x4.LookAt(Vector3.zero, Vector3.up, Vector3.back);
+            realtimeSkyboxViewPosition_ZPOS = realtimeSkyboxScaleMatrix * Matrix4x4.LookAt(Vector3.zero, Vector3.forward, Vector3.up);
+            realtimeSkyboxViewPosition_ZNEG = realtimeSkyboxScaleMatrix * Matrix4x4.LookAt(Vector3.zero, Vector3.back, Vector3.up);
 
+            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER ||||||||||||||||||||||||||||||||||||||
+            //get some data from the compute shader once (they don't change, no reason to get them every frame anyway)
+
+            computeShaderKernelCubemapCombine = cubemapRenderingCompute.FindKernel("CubemapCombine");
+            computeShaderKernelConvolveSpecularGGX = cubemapRenderingCompute.FindKernel("ConvolveSpecularGGX");
+            cubemapRenderingCompute.GetKernelThreadGroupSizes(computeShaderKernelCubemapCombine, out uint threadGroupSizeX, out uint threadGroupSizeY, out uint threadGroupSizeZ);
+            computeShaderThreadGroupSizeX = Mathf.CeilToInt(intermediateCubemap.width / threadGroupSizeX);
+            computeShaderThreadGroupSizeY = Mathf.CeilToInt(intermediateCubemap.height / threadGroupSizeY);
+            computeShaderThreadGroupSizeZ = (int)threadGroupSizeZ;
+            cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceResolution, reflectionProbe.resolution);
+            cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.SpecularConvolutionSamples, GGXSpecularConvolutionSamples);
+
+            //|||||||||||||||||||||||||||||||||||||| SETUP - SPECULAR CONVOLUTION TERMS ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - SPECULAR CONVOLUTION TERMS ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - SPECULAR CONVOLUTION TERMS ||||||||||||||||||||||||||||||||||||||
+            //NOTE: here we precompute a number of variables ahead of time that don't need to be updated every frame
+            //This pertains to the mip levels that we sample/modify later when doing specular convolution
+
+            //calculate amount of mips a texture with the reflection probe resolution ought to have
+            int mipCount = (int)Mathf.Log(reflectionProbe.resolution, 2);
+            int mipLevelResolution = reflectionProbe.resolution;
+
+            specularConvolutionMipLevels = new MipLevel[mipCount];
+
+            for (int i = 0; i < specularConvolutionMipLevels.Length; i++)
+            {
+                cubemapRenderingCompute.GetKernelThreadGroupSizes(computeShaderKernelCubemapCombine, out uint mipThreadGroupSizeX, out uint mipThreadGroupSizeY, out uint mipThreadGroupSizeZ);
+
+                specularConvolutionMipLevels[i] = new MipLevel()
+                {
+                    mipLevelSquareResolution = mipLevelResolution,
+                    roughnessLevel = Mathf.Pow((1.0f / specularConvolutionMipLevels.Length) * i, 2),
+                    computeShaderKernelThreadGroupSizeX = Mathf.Max(Mathf.CeilToInt(mipLevelResolution / mipThreadGroupSizeX), 4),
+                    computeShaderKernelThreadGroupSizeY = Mathf.Max(Mathf.CeilToInt(mipLevelResolution / mipThreadGroupSizeY), 4),
+                    computeShaderKernelThreadGroupSizeZ = (int)mipThreadGroupSizeZ,
+                };
+
+                mipLevelResolution /= 2;
+            }
+
+            //|||||||||||||||||||||||||||||||||||||| SETUP - SKYBOX MESH ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - SKYBOX MESH ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - SKYBOX MESH ||||||||||||||||||||||||||||||||||||||
 
             //GameObject skyboxMeshGameObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
             GameObject skyboxMeshGameObject = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             skyboxMesh = skyboxMeshGameObject.GetComponent<MeshFilter>().sharedMesh;
             DestroyImmediate(skyboxMeshGameObject);
 
+            //|||||||||||||||||||||||||||||||||||||| SETUP - MISC ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - MISC ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - MISC ||||||||||||||||||||||||||||||||||||||
 
-
-
-
-
-            projectionMatrix = probeCamera.projectionMatrix;
-
-            //X Positive (X+)
-            probeCameraGameObject.transform.rotation = Quaternion.LookRotation(Vector3.right, Vector3.up);
-            viewMatrixXPOS = probeCameraGameObject.transform.localToWorldMatrix;
-            viewMatrixXPOS = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(1, 1, -1)) * viewMatrixXPOS.inverse;
-            frustumPlanesXPOS = GeometryUtility.CalculateFrustumPlanes(probeCamera);
-
-            //X Negative (X-)
-            probeCameraGameObject.transform.rotation = Quaternion.LookRotation(Vector3.left, Vector3.up);
-            viewMatrixXNEG = probeCameraGameObject.transform.localToWorldMatrix;
-            viewMatrixXNEG = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(1, 1, -1)) * viewMatrixXNEG.inverse;
-            frustumPlanesXNEG = GeometryUtility.CalculateFrustumPlanes(probeCamera);
-
-            //Y Positive (Y+)
-            probeCameraGameObject.transform.rotation = Quaternion.LookRotation(Vector3.up, Vector3.down);
-            viewMatrixYPOS = probeCameraGameObject.transform.localToWorldMatrix;
-            viewMatrixYPOS = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(1, 1, -1)) * viewMatrixYPOS.inverse;
-            frustumPlanesYPOS = GeometryUtility.CalculateFrustumPlanes(probeCamera);
-
-            //Y Negative (Y-)
-            probeCameraGameObject.transform.rotation = Quaternion.LookRotation(Vector3.down, Vector3.down);
-            viewMatrixYNEG = probeCameraGameObject.transform.localToWorldMatrix;
-            viewMatrixYNEG = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(1, 1, -1)) * viewMatrixYNEG.inverse;
-            frustumPlanesYNEG = GeometryUtility.CalculateFrustumPlanes(probeCamera);
-
-            //Z Positive (Z+)
-            probeCameraGameObject.transform.rotation = Quaternion.LookRotation(Vector3.forward, Vector3.up);
-            viewMatrixZPOS = probeCameraGameObject.transform.localToWorldMatrix;
-            viewMatrixZPOS = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(1, 1, -1)) * viewMatrixZPOS.inverse;
-            frustumPlanesZPOS = GeometryUtility.CalculateFrustumPlanes(probeCamera);
-
-            //Z Negative (Z-)
-            probeCameraGameObject.transform.rotation = Quaternion.LookRotation(Vector3.back, Vector3.up);
-            viewMatrixZNEG = probeCameraGameObject.transform.localToWorldMatrix;
-            viewMatrixZNEG = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(1, 1, -1)) * viewMatrixZNEG.inverse;
-            frustumPlanesZNEG = GeometryUtility.CalculateFrustumPlanes(probeCamera);
-
-
-
-
-
-
-
-
-
-
-
-
-
-            reflectionProbeCommandBuffer = new CommandBuffer();
-
-            objectBuffers = new List<ObjectBuffer>();
-
-            MeshFilter[] meshFiltersInScene = FindObjectsByType<MeshFilter>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-
-            for(int i = 0; i < meshFiltersInScene.Length; i++)
-            {
-                //bool includeMesh = GameObjectUtility.GetStaticEditorFlags(meshFiltersInScene[i].gameObject).HasFlag(StaticEditorFlags.ContributeGI);
-                bool includeMesh = true;
-                meshFiltersInScene[i].TryGetComponent<MeshRenderer>(out MeshRenderer meshRenderer);
-
-                if(meshRenderer != null)
-                {
-                    //includeMesh = includeMesh && GeometryUtility.TestPlanesAABB(frustumPlanesXPOS, meshRenderer.bounds);
-                    //includeMesh = includeMesh && GeometryUtility.TestPlanesAABB(frustumPlanesXNEG, meshRenderer.bounds);
-                    //includeMesh = includeMesh && GeometryUtility.TestPlanesAABB(frustumPlanesYPOS, meshRenderer.bounds);
-                    //includeMesh = includeMesh && GeometryUtility.TestPlanesAABB(frustumPlanesYNEG, meshRenderer.bounds);
-                    //includeMesh = includeMesh && GeometryUtility.TestPlanesAABB(frustumPlanesZPOS, meshRenderer.bounds);
-                    //includeMesh = includeMesh && GeometryUtility.TestPlanesAABB(frustumPlanesZNEG, meshRenderer.bounds);
-                }
-
-                if (includeMesh)
-                {
-                    ObjectBuffer objectBuffer = new ObjectBuffer();
-                    objectBuffer.mesh = meshFiltersInScene[i].sharedMesh;
-                    objectBuffer.localToWorldMatrix = meshFiltersInScene[i].transform.localToWorldMatrix;
-                    objectBuffers.Add(objectBuffer);
-                }
-            }
-
-
-
-
-
-
-            //remove our main camera gameobject (which will get rid of the camera)
-            if (probeCameraGameObject != null)
-                DestroyImmediate(probeCameraGameObject);
-
-            //make sure these references are gone
-            probeCameraGameObject = null;
-            probeCamera = null;
-
+            //even though the impact is likely negligible we will compute this once instead of having to do it every frame
+            updateTime = 1.0f / updateFPS;
 
             //we are setup now to start rendering!
             isSetup = true;
@@ -341,14 +313,11 @@ namespace ImprovedCubemapRendering
         /// </summary>
         private void Cleanup()
         {
-            if (blackObjectMaterial != null)
-                DestroyImmediate(blackObjectMaterial);
+            if (cubemapFaceRender != null && cubemapFaceRender.IsCreated())
+                cubemapFaceRender.Release();
 
-            if (probeCameraRender != null && probeCameraRender.IsCreated())
-                probeCameraRender.Release();
-
-            if (rawCubemap != null && rawCubemap.IsCreated())
-                rawCubemap.Release();
+            if (intermediateCubemap != null && intermediateCubemap.IsCreated())
+                intermediateCubemap.Release();
 
             if (convolvedCubemap != null && convolvedCubemap.IsCreated())
                 convolvedCubemap.Release();
@@ -356,11 +325,8 @@ namespace ImprovedCubemapRendering
             if (finalCubemap != null && finalCubemap.IsCreated())
                 finalCubemap.Release();
 
-            if (objectBuffers != null)
-                objectBuffers.Clear();
-
-            if (reflectionProbeCommandBuffer != null)
-                reflectionProbeCommandBuffer.Clear();
+            if (realtimeSkyboxCommandBuffer != null)
+                realtimeSkyboxCommandBuffer.Clear();
 
             isSetup = false;
         }
@@ -372,10 +338,12 @@ namespace ImprovedCubemapRendering
 
         public void RenderRealtimeCubemap()
         {
+            //if we are not setup, we can't render!
             if (!isSetup)
                 return;
 
-            if (Time.time < nextUpdateInterval)
+            //if it's not our time to update, then don't render!
+            if (Time.time < nextUpdateInterval && update)
                 return;
 
             //|||||||||||||||||||||||||||||||||||||| RENDER CUBEMAP FACES ||||||||||||||||||||||||||||||||||||||
@@ -385,175 +353,132 @@ namespace ImprovedCubemapRendering
             //render the camera on a given orientation, then combine the result back into our final cubemap which is handled with the compute shader
 
             //X Positive (X+)
-            reflectionProbeCommandBuffer.Clear();
-            reflectionProbeCommandBuffer.SetRenderTarget(probeCameraRender);
-            reflectionProbeCommandBuffer.SetViewProjectionMatrices(viewMatrixXPOS, projectionMatrix);
-            reflectionProbeCommandBuffer.SetViewport(new Rect(0, 0, probeCameraRender.width, probeCameraRender.height));
-            reflectionProbeCommandBuffer.ClearRenderTarget(true, true, Color.clear); //IMPORTANT: clear contents before we render a new frame
+            realtimeSkyboxCommandBuffer.Clear();
+            realtimeSkyboxCommandBuffer.SetRenderTarget(cubemapFaceRender);
+            realtimeSkyboxCommandBuffer.SetViewProjectionMatrices(realtimeSkyboxViewPosition_XPOS, realtimeSkyboxCameraProjection);
+            realtimeSkyboxCommandBuffer.SetViewport(cubemapFaceRenderViewport);
+            realtimeSkyboxCommandBuffer.ClearRenderTarget(true, true, Color.clear); //IMPORTANT: clear contents before we render a new frame
+            realtimeSkyboxCommandBuffer.DrawMesh(skyboxMesh, realtimeSkyboxMeshTransformMatrix, RenderSettings.skybox);
 
-            reflectionProbeCommandBuffer.DrawMesh(skyboxMesh, transform.localToWorldMatrix, RenderSettings.skybox);
+            Graphics.ExecuteCommandBuffer(realtimeSkyboxCommandBuffer);
 
-            for (int i = 0; i < objectBuffers.Count; i++)
-            {
-                ObjectBuffer objectBuffer = objectBuffers[i];
-                reflectionProbeCommandBuffer.DrawMesh(objectBuffer.mesh, objectBuffer.localToWorldMatrix, blackObjectMaterial);
-            }
-
-            Graphics.ExecuteCommandBuffer(reflectionProbeCommandBuffer);
-
-            cubemapRenderingCompute.SetInt("CubemapFaceIndex", 0);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "SceneRender", probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "CubemapResult", rawCubemap);
-            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, Mathf.CeilToInt(rawCubemap.width / computeShaderThreadGroupSizeX), Mathf.CeilToInt(rawCubemap.height / computeShaderThreadGroupSizeY), 1);
+            cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, 0);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapFace, cubemapFaceRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.SkyboxVisibilityFace, skyboxVisibilityXPOS);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, intermediateCubemap);
+            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //X Negative (X-)
-            reflectionProbeCommandBuffer.Clear();
-            reflectionProbeCommandBuffer.SetRenderTarget(probeCameraRender);
-            reflectionProbeCommandBuffer.SetViewProjectionMatrices(viewMatrixXNEG, projectionMatrix);
-            reflectionProbeCommandBuffer.SetViewport(new Rect(0, 0, probeCameraRender.width, probeCameraRender.height));
-            reflectionProbeCommandBuffer.ClearRenderTarget(true, true, Color.clear); //IMPORTANT: clear contents before we render a new frame
+            realtimeSkyboxCommandBuffer.Clear();
+            realtimeSkyboxCommandBuffer.SetRenderTarget(cubemapFaceRender);
+            realtimeSkyboxCommandBuffer.SetViewProjectionMatrices(realtimeSkyboxViewPosition_XNEG, realtimeSkyboxCameraProjection);
+            realtimeSkyboxCommandBuffer.SetViewport(cubemapFaceRenderViewport);
+            realtimeSkyboxCommandBuffer.ClearRenderTarget(true, true, Color.clear); //IMPORTANT: clear contents before we render a new frame
+            realtimeSkyboxCommandBuffer.DrawMesh(skyboxMesh, realtimeSkyboxMeshTransformMatrix, RenderSettings.skybox);
 
-            reflectionProbeCommandBuffer.DrawMesh(skyboxMesh, transform.localToWorldMatrix, RenderSettings.skybox);
+            Graphics.ExecuteCommandBuffer(realtimeSkyboxCommandBuffer);
 
-            for (int i = 0; i < objectBuffers.Count; i++)
-            {
-                ObjectBuffer objectBuffer = objectBuffers[i];
-                reflectionProbeCommandBuffer.DrawMesh(objectBuffer.mesh, objectBuffer.localToWorldMatrix, blackObjectMaterial);
-            }
-
-            Graphics.ExecuteCommandBuffer(reflectionProbeCommandBuffer);
-
-            cubemapRenderingCompute.SetInt("CubemapFaceIndex", 1);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "SceneRender", probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "CubemapResult", rawCubemap);
-            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, Mathf.CeilToInt(rawCubemap.width / computeShaderThreadGroupSizeX), Mathf.CeilToInt(rawCubemap.height / computeShaderThreadGroupSizeY), 1);
-
-            reflectionProbeCommandBuffer.DrawMesh(skyboxMesh, transform.localToWorldMatrix, RenderSettings.skybox);
+            cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, 1);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapFace, cubemapFaceRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.SkyboxVisibilityFace, skyboxVisibilityXNEG);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, intermediateCubemap);
+            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //Y Positive (Y+)
-            reflectionProbeCommandBuffer.Clear();
-            reflectionProbeCommandBuffer.SetRenderTarget(probeCameraRender);
-            reflectionProbeCommandBuffer.SetViewProjectionMatrices(viewMatrixYPOS, projectionMatrix);
-            reflectionProbeCommandBuffer.SetViewport(new Rect(0, 0, probeCameraRender.width, probeCameraRender.height));
-            reflectionProbeCommandBuffer.ClearRenderTarget(true, true, Color.clear); //IMPORTANT: clear contents before we render a new frame
+            realtimeSkyboxCommandBuffer.Clear();
+            realtimeSkyboxCommandBuffer.SetRenderTarget(cubemapFaceRender);
+            realtimeSkyboxCommandBuffer.SetViewProjectionMatrices(realtimeSkyboxViewPosition_YPOS, realtimeSkyboxCameraProjection);
+            realtimeSkyboxCommandBuffer.SetViewport(cubemapFaceRenderViewport);
+            realtimeSkyboxCommandBuffer.ClearRenderTarget(true, true, Color.clear); //IMPORTANT: clear contents before we render a new frame
+            realtimeSkyboxCommandBuffer.DrawMesh(skyboxMesh, realtimeSkyboxMeshTransformMatrix, RenderSettings.skybox);
 
-            reflectionProbeCommandBuffer.DrawMesh(skyboxMesh, transform.localToWorldMatrix, RenderSettings.skybox);
+            Graphics.ExecuteCommandBuffer(realtimeSkyboxCommandBuffer);
 
-            for (int i = 0; i < objectBuffers.Count; i++)
-            {
-                ObjectBuffer objectBuffer = objectBuffers[i];
-                reflectionProbeCommandBuffer.DrawMesh(objectBuffer.mesh, objectBuffer.localToWorldMatrix, blackObjectMaterial);
-            }
-
-            Graphics.ExecuteCommandBuffer(reflectionProbeCommandBuffer);
-
-            cubemapRenderingCompute.SetInt("CubemapFaceIndex", 2);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "SceneRender", probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "CubemapResult", rawCubemap);
-            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, Mathf.CeilToInt(rawCubemap.width / computeShaderThreadGroupSizeX), Mathf.CeilToInt(rawCubemap.height / computeShaderThreadGroupSizeY), 1);
+            cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, 2);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapFace, cubemapFaceRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.SkyboxVisibilityFace, skyboxVisibilityYPOS);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, intermediateCubemap);
+            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //Y Negative (Y-)
-            reflectionProbeCommandBuffer.Clear();
-            reflectionProbeCommandBuffer.SetRenderTarget(probeCameraRender);
-            reflectionProbeCommandBuffer.SetViewProjectionMatrices(viewMatrixYNEG, projectionMatrix);
-            reflectionProbeCommandBuffer.SetViewport(new Rect(0, 0, probeCameraRender.width, probeCameraRender.height));
-            reflectionProbeCommandBuffer.ClearRenderTarget(true, true, Color.clear); //IMPORTANT: clear contents before we render a new frame
+            realtimeSkyboxCommandBuffer.Clear();
+            realtimeSkyboxCommandBuffer.SetRenderTarget(cubemapFaceRender);
+            realtimeSkyboxCommandBuffer.SetViewProjectionMatrices(realtimeSkyboxViewPosition_YNEG, realtimeSkyboxCameraProjection);
+            realtimeSkyboxCommandBuffer.SetViewport(cubemapFaceRenderViewport);
+            realtimeSkyboxCommandBuffer.ClearRenderTarget(true, true, Color.clear); //IMPORTANT: clear contents before we render a new frame
+            realtimeSkyboxCommandBuffer.DrawMesh(skyboxMesh, realtimeSkyboxMeshTransformMatrix, RenderSettings.skybox);
 
-            reflectionProbeCommandBuffer.DrawMesh(skyboxMesh, transform.localToWorldMatrix, RenderSettings.skybox);
+            Graphics.ExecuteCommandBuffer(realtimeSkyboxCommandBuffer);
 
-            for (int i = 0; i < objectBuffers.Count; i++)
-            {
-                ObjectBuffer objectBuffer = objectBuffers[i];
-                reflectionProbeCommandBuffer.DrawMesh(objectBuffer.mesh, objectBuffer.localToWorldMatrix, blackObjectMaterial);
-            }
-
-            Graphics.ExecuteCommandBuffer(reflectionProbeCommandBuffer);
-
-            cubemapRenderingCompute.SetInt("CubemapFaceIndex", 3);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "SceneRender", probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "CubemapResult", rawCubemap);
-            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, Mathf.CeilToInt(rawCubemap.width / computeShaderThreadGroupSizeX), Mathf.CeilToInt(rawCubemap.height / computeShaderThreadGroupSizeY), 1);
+            cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, 3);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapFace, cubemapFaceRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.SkyboxVisibilityFace, skyboxVisibilityYNEG);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, intermediateCubemap);
+            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //Z Positive (Z+)
-            reflectionProbeCommandBuffer.Clear();
-            reflectionProbeCommandBuffer.SetRenderTarget(probeCameraRender);
-            reflectionProbeCommandBuffer.SetViewProjectionMatrices(viewMatrixZPOS, projectionMatrix);
-            reflectionProbeCommandBuffer.SetViewport(new Rect(0, 0, probeCameraRender.width, probeCameraRender.height));
-            reflectionProbeCommandBuffer.ClearRenderTarget(true, true, Color.clear); //IMPORTANT: clear contents before we render a new frame
+            realtimeSkyboxCommandBuffer.Clear();
+            realtimeSkyboxCommandBuffer.SetRenderTarget(cubemapFaceRender);
+            realtimeSkyboxCommandBuffer.SetViewProjectionMatrices(realtimeSkyboxViewPosition_ZPOS, realtimeSkyboxCameraProjection);
+            realtimeSkyboxCommandBuffer.SetViewport(cubemapFaceRenderViewport);
+            realtimeSkyboxCommandBuffer.ClearRenderTarget(true, true, Color.clear); //IMPORTANT: clear contents before we render a new frame
+            realtimeSkyboxCommandBuffer.DrawMesh(skyboxMesh, realtimeSkyboxMeshTransformMatrix, RenderSettings.skybox);
 
-            reflectionProbeCommandBuffer.DrawMesh(skyboxMesh, transform.localToWorldMatrix, RenderSettings.skybox);
+            Graphics.ExecuteCommandBuffer(realtimeSkyboxCommandBuffer);
 
-            for (int i = 0; i < objectBuffers.Count; i++)
-            {
-                ObjectBuffer objectBuffer = objectBuffers[i];
-                reflectionProbeCommandBuffer.DrawMesh(objectBuffer.mesh, objectBuffer.localToWorldMatrix, blackObjectMaterial);
-            }
-
-            Graphics.ExecuteCommandBuffer(reflectionProbeCommandBuffer);
-
-            cubemapRenderingCompute.SetInt("CubemapFaceIndex", 4);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "SceneRender", probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "CubemapResult", rawCubemap);
-            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, Mathf.CeilToInt(rawCubemap.width / computeShaderThreadGroupSizeX), Mathf.CeilToInt(rawCubemap.height / computeShaderThreadGroupSizeY), 1);
+            cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, 4);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapFace, cubemapFaceRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.SkyboxVisibilityFace, skyboxVisibilityZPOS);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, intermediateCubemap);
+            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //Z Negative (Z-)
-            reflectionProbeCommandBuffer.Clear();
-            reflectionProbeCommandBuffer.SetRenderTarget(probeCameraRender);
-            reflectionProbeCommandBuffer.SetViewProjectionMatrices(viewMatrixZNEG, projectionMatrix);
-            reflectionProbeCommandBuffer.SetViewport(new Rect(0, 0, probeCameraRender.width, probeCameraRender.height));
-            reflectionProbeCommandBuffer.ClearRenderTarget(true, true, Color.clear); //IMPORTANT: clear contents before we render a new frame
+            realtimeSkyboxCommandBuffer.Clear();
+            realtimeSkyboxCommandBuffer.SetRenderTarget(cubemapFaceRender);
+            realtimeSkyboxCommandBuffer.SetViewProjectionMatrices(realtimeSkyboxViewPosition_ZNEG, realtimeSkyboxCameraProjection);
+            realtimeSkyboxCommandBuffer.SetViewport(cubemapFaceRenderViewport);
+            realtimeSkyboxCommandBuffer.ClearRenderTarget(true, true, Color.clear); //IMPORTANT: clear contents before we render a new frame
+            realtimeSkyboxCommandBuffer.DrawMesh(skyboxMesh, realtimeSkyboxMeshTransformMatrix, RenderSettings.skybox);
 
-            reflectionProbeCommandBuffer.DrawMesh(skyboxMesh, transform.localToWorldMatrix, RenderSettings.skybox);
+            Graphics.ExecuteCommandBuffer(realtimeSkyboxCommandBuffer);
 
-            for (int i = 0; i < objectBuffers.Count; i++)
-            {
-                ObjectBuffer objectBuffer = objectBuffers[i];
-                reflectionProbeCommandBuffer.DrawMesh(objectBuffer.mesh, objectBuffer.localToWorldMatrix, blackObjectMaterial);
-            }
-
-            Graphics.ExecuteCommandBuffer(reflectionProbeCommandBuffer);
-
-            cubemapRenderingCompute.SetInt("CubemapFaceIndex", 5);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "SceneRender", probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, "CubemapResult", rawCubemap);
-            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, Mathf.CeilToInt(rawCubemap.width / computeShaderThreadGroupSizeX), Mathf.CeilToInt(rawCubemap.height / computeShaderThreadGroupSizeY), 1);
+            cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, 5);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapFace, cubemapFaceRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.SkyboxVisibilityFace, skyboxVisibilityZNEG);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, intermediateCubemap);
+            cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //generate mips so PBR shaders can sample a slightly blurrier version of the reflection cubemap
             //IMPORTANT NOTE: this is not PBR compliant, PBR shaders in unity (and most engines if configured as such) actually need a special mip map setup for reflection cubemaps (specular convolution)
             //so what actually comes from this is not correct nor should it be used (if you really really really have no other choice I suppose you can)
             //with that said in a later version of this we do use a proper specular convolution setup, but this is here just for illustrative/simplicity purposes
-            rawCubemap.GenerateMips();
+            intermediateCubemap.GenerateMips();
 
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
 
-            // Transfer mip 0 (this is done separately from the loop below as we do not want to blur it)
-            // this saves us a little extra work since the first mip level should be the original reflection
+            //transfer mip 0 (this is done separately from the loop below as we do not want to blur it)
+            //this saves us a little extra work since the first mip level should be the original reflection
             for (int face = 0; face < 6; face++)
             {
-                Graphics.CopyTexture(rawCubemap, face, 0, convolvedCubemap, face, 0);
+                Graphics.CopyTexture(intermediateCubemap, face, 0, convolvedCubemap, face, 0);
             }
 
             //for each cubemap face
             for (int face = 0; face < 6; face++)
             {
-                int mipLevelResolution = reflectionProbe.resolution / 2;
-
                 //iterate for each mip level
-                for (int mip = 1; mip < convolvedCubemap.mipmapCount; mip++)
+                for (int mip = 1; mip < specularConvolutionMipLevels.Length; mip++)
                 {
-                    float roughnessLevel = (1.0f / convolvedCubemap.mipmapCount) * mip;
-                    roughnessLevel *= roughnessLevel;
+                    MipLevel mipLevel = specularConvolutionMipLevels[mip];
 
-                    cubemapRenderingCompute.SetInt("CubemapFaceIndex", face);
-                    cubemapRenderingCompute.SetInt("CubemapMipFaceResolution", mipLevelResolution);
-                    cubemapRenderingCompute.SetFloat("Roughness", roughnessLevel);
-                    cubemapRenderingCompute.SetTexture(computeShaderKernelConvolveSpecularGGX, "InputCubemap", rawCubemap, mip);
-                    cubemapRenderingCompute.SetTexture(computeShaderKernelConvolveSpecularGGX, "CubemapResult", convolvedCubemap, mip);
-                    cubemapRenderingCompute.Dispatch(computeShaderKernelConvolveSpecularGGX, Mathf.Max(Mathf.CeilToInt(mipLevelResolution / computeShaderThreadGroupSizeX), 4), Mathf.Max(Mathf.CeilToInt(mipLevelResolution / computeShaderThreadGroupSizeY), 4), 1);
-
-                    mipLevelResolution /= 2;
+                    cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, face);
+                    cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapMipFaceResolution, mipLevel.mipLevelSquareResolution);
+                    cubemapRenderingCompute.SetFloat(RealtimeCubemapRenderingShaderIDsV4.SpecularRoughness, mipLevel.roughnessLevel);
+                    cubemapRenderingCompute.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeCubemapRenderingShaderIDsV4.InputCubemap, intermediateCubemap, mip);
+                    cubemapRenderingCompute.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, convolvedCubemap, mip);
+                    cubemapRenderingCompute.Dispatch(computeShaderKernelConvolveSpecularGGX, mipLevel.computeShaderKernelThreadGroupSizeX, mipLevel.computeShaderKernelThreadGroupSizeY, mipLevel.computeShaderKernelThreadGroupSizeZ);
                 }
             }
             //|||||||||||||||||||||||||||||||||||||| TRANSFER FINAL RESULTS TO PROPER CUBEMAP ||||||||||||||||||||||||||||||||||||||
@@ -573,7 +498,7 @@ namespace ImprovedCubemapRendering
             }
 
             //update next time interval
-            nextUpdateInterval = Time.time + (1.0f / updateFPS);
+            nextUpdateInterval = Time.time + updateTime;
         }
 
         //|||||||||||||||||||||||||||||||||||||| EDITOR ||||||||||||||||||||||||||||||||||||||
@@ -622,5 +547,216 @@ namespace ImprovedCubemapRendering
         }
 
         public static bool ContainBounds(Bounds bounds, Bounds target) => bounds.Contains(target.center) || bounds.Contains(target.min) || bounds.Contains(target.max);
+
+        //|||||||||||||||||||||||||||||||||||||| PRECOMPUTE SCENE BUFFER ||||||||||||||||||||||||||||||||||||||
+        //|||||||||||||||||||||||||||||||||||||| PRECOMPUTE SCENE BUFFER ||||||||||||||||||||||||||||||||||||||
+        //|||||||||||||||||||||||||||||||||||||| PRECOMPUTE SCENE BUFFER ||||||||||||||||||||||||||||||||||||||
+
+        [ContextMenu("Precompute Skybox Visibility")]
+        public void PrecomputeSkyboxVisibility()
+        {
+            //|||||||||||||||||||||||||||||||||||||| PRECOMPUTE SCENE BUFFER - SETUP ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| PRECOMPUTE SCENE BUFFER - SETUP ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| PRECOMPUTE SCENE BUFFER - SETUP ||||||||||||||||||||||||||||||||||||||
+
+            //get the main reflection probe
+            reflectionProbe = GetComponent<ReflectionProbe>();
+
+            //setup our render texture converter class so we can convert render textures to texture2D objects efficently/easily
+            RenderTextureConverter renderTextureConverter = new RenderTextureConverter();
+
+            //create a regular 2D render target for the camera
+            RenderTexture cubemapFace = new RenderTexture(reflectionProbe.resolution, reflectionProbe.resolution, renderTargetDepthBits, skyboxVisibilityFormat);
+            cubemapFace.filterMode = FilterMode.Trilinear;
+            cubemapFace.wrapMode = TextureWrapMode.Clamp;
+            cubemapFace.enableRandomWrite = true;
+            cubemapFace.isPowerOfTwo = true;
+            cubemapFace.Create();
+
+
+
+
+
+
+
+
+
+
+
+            CommandBuffer precomputeSkyboxVisibilityCommandBuffer = new CommandBuffer();
+
+            List<SceneMesh> sceneMeshes = GetSceneMeshes();
+
+            string skyboxVisibilityXPOS_assetPath = string.Format("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV4/Data/SkyboxVisibility_XPOS_{0}_{1}.asset", SceneManager.GetActiveScene().name, gameObject.name);
+            string skyboxVisibilityXNEG_assetPath = string.Format("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV4/Data/SkyboxVisibility_XNEG_{0}_{1}.asset", SceneManager.GetActiveScene().name, gameObject.name);
+            string skyboxVisibilityYPOS_assetPath = string.Format("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV4/Data/SkyboxVisibility_YPOS_{0}_{1}.asset", SceneManager.GetActiveScene().name, gameObject.name);
+            string skyboxVisibilityYNEG_assetPath = string.Format("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV4/Data/SkyboxVisibility_YNEG_{0}_{1}.asset", SceneManager.GetActiveScene().name, gameObject.name);
+            string skyboxVisibilityZPOS_assetPath = string.Format("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV4/Data/SkyboxVisibility_ZPOS_{0}_{1}.asset", SceneManager.GetActiveScene().name, gameObject.name);
+            string skyboxVisibilityZNEG_assetPath = string.Format("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV4/Data/SkyboxVisibility_ZNEG_{0}_{1}.asset", SceneManager.GetActiveScene().name, gameObject.name);
+
+            Matrix4x4 skyboxVisibilityCameraLookMatrix;
+            Matrix4x4 skyboxVisibilityCameraScaleMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(1, -1, -1));
+            Matrix4x4 skyboxVisibilityCameraViewPosition;
+            Matrix4x4 skyboxVisibilityCameraProjection = Matrix4x4.Perspective(90.0f, 1.0f, reflectionProbe.nearClipPlane, reflectionProbe.farClipPlane);
+            Vector3 skyboxVisibilityCameraPosition = reflectionProbe.transform.position + reflectionProbe.center;
+
+            Material blackObjectMaterial = new Material(blackObjectShader);
+
+            //|||||||||||||||||||||||||||||||||||||| RENDER CUBEMAP FACES ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| RENDER CUBEMAP FACES ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| RENDER CUBEMAP FACES ||||||||||||||||||||||||||||||||||||||
+            //here we actually render the scene in 6 different axis
+            //render the camera on a given orientation, then combine the result back into our final cubemap which is handled with the compute shader
+
+            GL.invertCulling = true;
+
+            //X Positive (X+)
+            skyboxVisibilityCameraLookMatrix = Matrix4x4.LookAt(skyboxVisibilityCameraPosition, skyboxVisibilityCameraPosition + Vector3.right, Vector3.up);
+            skyboxVisibilityCameraViewPosition = skyboxVisibilityCameraScaleMatrix * skyboxVisibilityCameraLookMatrix.inverse;
+            precomputeSkyboxVisibilityCommandBuffer.Clear();
+            precomputeSkyboxVisibilityCommandBuffer.SetRenderTarget(cubemapFace);
+            precomputeSkyboxVisibilityCommandBuffer.SetViewProjectionMatrices(skyboxVisibilityCameraViewPosition, skyboxVisibilityCameraProjection);
+            precomputeSkyboxVisibilityCommandBuffer.SetViewport(new Rect(0, 0, cubemapFace.width, cubemapFace.height));
+            precomputeSkyboxVisibilityCommandBuffer.ClearRenderTarget(true, true, Color.white); //IMPORTANT: clear contents before we render a new frame
+
+            for (int i = 0; i < sceneMeshes.Count; i++)
+            {
+                precomputeSkyboxVisibilityCommandBuffer.DrawMesh(sceneMeshes[i].mesh, sceneMeshes[i].localToWorldMatrix, blackObjectMaterial);
+            }
+
+            Graphics.ExecuteCommandBuffer(precomputeSkyboxVisibilityCommandBuffer);
+
+            renderTextureConverter.SaveRenderTexture2DAsTexture2D(cubemapFace, string.Format("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV4/Data/SkyboxVisibility_XPOS_{0}_{1}.asset", SceneManager.GetActiveScene().name, gameObject.name));
+
+            //X Negative (X-)
+            skyboxVisibilityCameraLookMatrix = Matrix4x4.LookAt(skyboxVisibilityCameraPosition, skyboxVisibilityCameraPosition + Vector3.left, Vector3.up);
+            skyboxVisibilityCameraViewPosition = skyboxVisibilityCameraScaleMatrix * skyboxVisibilityCameraLookMatrix.inverse;
+            precomputeSkyboxVisibilityCommandBuffer.Clear();
+            precomputeSkyboxVisibilityCommandBuffer.SetRenderTarget(cubemapFace);
+            precomputeSkyboxVisibilityCommandBuffer.SetViewProjectionMatrices(skyboxVisibilityCameraViewPosition, skyboxVisibilityCameraProjection);
+            precomputeSkyboxVisibilityCommandBuffer.SetViewport(new Rect(0, 0, cubemapFace.width, cubemapFace.height));
+            precomputeSkyboxVisibilityCommandBuffer.ClearRenderTarget(true, true, Color.white); //IMPORTANT: clear contents before we render a new frame
+
+            for (int i = 0; i < sceneMeshes.Count; i++)
+            {
+                precomputeSkyboxVisibilityCommandBuffer.DrawMesh(sceneMeshes[i].mesh, sceneMeshes[i].localToWorldMatrix, blackObjectMaterial);
+            }
+
+            Graphics.ExecuteCommandBuffer(precomputeSkyboxVisibilityCommandBuffer);
+
+            renderTextureConverter.SaveRenderTexture2DAsTexture2D(cubemapFace, string.Format("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV4/Data/SkyboxVisibility_XNEG_{0}_{1}.asset", SceneManager.GetActiveScene().name, gameObject.name));
+
+            //Y Positive (Y+)
+            skyboxVisibilityCameraLookMatrix = Matrix4x4.LookAt(skyboxVisibilityCameraPosition, skyboxVisibilityCameraPosition + Vector3.up, Vector3.back);
+            skyboxVisibilityCameraViewPosition = skyboxVisibilityCameraScaleMatrix * skyboxVisibilityCameraLookMatrix.inverse;
+            precomputeSkyboxVisibilityCommandBuffer.Clear();
+            precomputeSkyboxVisibilityCommandBuffer.SetRenderTarget(cubemapFace);
+            precomputeSkyboxVisibilityCommandBuffer.SetViewProjectionMatrices(skyboxVisibilityCameraViewPosition, skyboxVisibilityCameraProjection);
+            precomputeSkyboxVisibilityCommandBuffer.SetViewport(new Rect(0, 0, cubemapFace.width, cubemapFace.height));
+            precomputeSkyboxVisibilityCommandBuffer.ClearRenderTarget(true, true, Color.white); //IMPORTANT: clear contents before we render a new frame
+
+            for (int i = 0; i < sceneMeshes.Count; i++)
+            {
+                precomputeSkyboxVisibilityCommandBuffer.DrawMesh(sceneMeshes[i].mesh, sceneMeshes[i].localToWorldMatrix, blackObjectMaterial);
+            }
+
+            Graphics.ExecuteCommandBuffer(precomputeSkyboxVisibilityCommandBuffer);
+
+            renderTextureConverter.SaveRenderTexture2DAsTexture2D(cubemapFace, string.Format("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV4/Data/SkyboxVisibility_YPOS_{0}_{1}.asset", SceneManager.GetActiveScene().name, gameObject.name));
+
+            //Y Negative (Y-)
+            skyboxVisibilityCameraLookMatrix = Matrix4x4.LookAt(skyboxVisibilityCameraPosition, skyboxVisibilityCameraPosition + Vector3.down, Vector3.forward);
+            skyboxVisibilityCameraViewPosition = skyboxVisibilityCameraScaleMatrix * skyboxVisibilityCameraLookMatrix.inverse;
+            precomputeSkyboxVisibilityCommandBuffer.Clear();
+            precomputeSkyboxVisibilityCommandBuffer.SetRenderTarget(cubemapFace);
+            precomputeSkyboxVisibilityCommandBuffer.SetViewProjectionMatrices(skyboxVisibilityCameraViewPosition, skyboxVisibilityCameraProjection);
+            precomputeSkyboxVisibilityCommandBuffer.SetViewport(new Rect(0, 0, cubemapFace.width, cubemapFace.height));
+            precomputeSkyboxVisibilityCommandBuffer.ClearRenderTarget(true, true, Color.white); //IMPORTANT: clear contents before we render a new frame
+
+            for (int i = 0; i < sceneMeshes.Count; i++)
+            {
+                precomputeSkyboxVisibilityCommandBuffer.DrawMesh(sceneMeshes[i].mesh, sceneMeshes[i].localToWorldMatrix, blackObjectMaterial);
+            }
+
+            Graphics.ExecuteCommandBuffer(precomputeSkyboxVisibilityCommandBuffer);
+
+            renderTextureConverter.SaveRenderTexture2DAsTexture2D(cubemapFace, string.Format("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV4/Data/SkyboxVisibility_YNEG_{0}_{1}.asset", SceneManager.GetActiveScene().name, gameObject.name));
+
+            //Z Positive (Z+)
+            skyboxVisibilityCameraLookMatrix = Matrix4x4.LookAt(skyboxVisibilityCameraPosition, skyboxVisibilityCameraPosition + Vector3.forward, Vector3.up);
+            skyboxVisibilityCameraViewPosition = skyboxVisibilityCameraScaleMatrix * skyboxVisibilityCameraLookMatrix.inverse;
+            precomputeSkyboxVisibilityCommandBuffer.Clear();
+            precomputeSkyboxVisibilityCommandBuffer.SetRenderTarget(cubemapFace);
+            precomputeSkyboxVisibilityCommandBuffer.SetViewProjectionMatrices(skyboxVisibilityCameraViewPosition, skyboxVisibilityCameraProjection);
+            precomputeSkyboxVisibilityCommandBuffer.SetViewport(new Rect(0, 0, cubemapFace.width, cubemapFace.height));
+            precomputeSkyboxVisibilityCommandBuffer.ClearRenderTarget(true, true, Color.white); //IMPORTANT: clear contents before we render a new frame
+
+            for (int i = 0; i < sceneMeshes.Count; i++)
+            {
+                precomputeSkyboxVisibilityCommandBuffer.DrawMesh(sceneMeshes[i].mesh, sceneMeshes[i].localToWorldMatrix, blackObjectMaterial);
+            }
+
+            Graphics.ExecuteCommandBuffer(precomputeSkyboxVisibilityCommandBuffer);
+
+            renderTextureConverter.SaveRenderTexture2DAsTexture2D(cubemapFace, string.Format("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV4/Data/SkyboxVisibility_ZPOS_{0}_{1}.asset", SceneManager.GetActiveScene().name, gameObject.name));
+
+            //Z Negative (Z-)
+            skyboxVisibilityCameraLookMatrix = Matrix4x4.LookAt(skyboxVisibilityCameraPosition, skyboxVisibilityCameraPosition + Vector3.back, Vector3.up);
+            skyboxVisibilityCameraViewPosition = skyboxVisibilityCameraScaleMatrix * skyboxVisibilityCameraLookMatrix.inverse;
+            precomputeSkyboxVisibilityCommandBuffer.Clear();
+            precomputeSkyboxVisibilityCommandBuffer.SetRenderTarget(cubemapFace);
+            precomputeSkyboxVisibilityCommandBuffer.SetViewProjectionMatrices(skyboxVisibilityCameraViewPosition, skyboxVisibilityCameraProjection);
+            precomputeSkyboxVisibilityCommandBuffer.SetViewport(new Rect(0, 0, cubemapFace.width, cubemapFace.height));
+            precomputeSkyboxVisibilityCommandBuffer.ClearRenderTarget(true, true, Color.white); //IMPORTANT: clear contents before we render a new frame
+            precomputeSkyboxVisibilityCommandBuffer.SetInvertCulling(true);
+
+            for (int i = 0; i < sceneMeshes.Count; i++)
+            {
+                precomputeSkyboxVisibilityCommandBuffer.DrawMesh(sceneMeshes[i].mesh, sceneMeshes[i].localToWorldMatrix, blackObjectMaterial);
+            }
+
+            Graphics.ExecuteCommandBuffer(precomputeSkyboxVisibilityCommandBuffer);
+
+            renderTextureConverter.SaveRenderTexture2DAsTexture2D(cubemapFace, string.Format("Assets/ImprovedCubemapRendering/RealtimeCubemapRenderingV4/Data/SkyboxVisibility_ZNEG_{0}_{1}.asset", SceneManager.GetActiveScene().name, gameObject.name));
+
+            GL.invertCulling = false;
+
+            skyboxVisibilityXPOS = AssetDatabase.LoadAssetAtPath<Texture2D>(skyboxVisibilityXPOS_assetPath);
+            skyboxVisibilityXNEG = AssetDatabase.LoadAssetAtPath<Texture2D>(skyboxVisibilityXNEG_assetPath);
+            skyboxVisibilityYPOS = AssetDatabase.LoadAssetAtPath<Texture2D>(skyboxVisibilityYPOS_assetPath);
+            skyboxVisibilityYNEG = AssetDatabase.LoadAssetAtPath<Texture2D>(skyboxVisibilityYNEG_assetPath);
+            skyboxVisibilityZPOS = AssetDatabase.LoadAssetAtPath<Texture2D>(skyboxVisibilityZPOS_assetPath);
+            skyboxVisibilityZNEG = AssetDatabase.LoadAssetAtPath<Texture2D>(skyboxVisibilityZNEG_assetPath);
+
+            cubemapFace.Release();
+            precomputeSkyboxVisibilityCommandBuffer.Release();
+
+            DestroyImmediate(blackObjectMaterial);
+        }
+
+        private List<SceneMesh> GetSceneMeshes()
+        {
+            List<SceneMesh> sceneMeshes = new List<SceneMesh>();
+
+            MeshFilter[] meshFiltersInScene = FindObjectsByType<MeshFilter>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+
+            for (int i = 0; i < meshFiltersInScene.Length; i++)
+            {
+                //bool includeMesh = GameObjectUtility.GetStaticEditorFlags(meshFiltersInScene[i].gameObject).HasFlag(StaticEditorFlags.ContributeGI);
+
+                bool includeMesh = true;
+                meshFiltersInScene[i].TryGetComponent<MeshRenderer>(out MeshRenderer meshRenderer);
+
+                if (includeMesh)
+                {
+                    SceneMesh sceneMesh = new SceneMesh();
+                    sceneMesh.mesh = meshFiltersInScene[i].sharedMesh;
+                    sceneMesh.localToWorldMatrix = meshFiltersInScene[i].transform.localToWorldMatrix;
+                    sceneMeshes.Add(sceneMesh);
+                }
+            }
+
+            return sceneMeshes;
+        }
     }
 }

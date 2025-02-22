@@ -4,28 +4,29 @@
 
 #define PI 3.14159265359f
 
+int SpecularConvolutionSamples;
+float SpecularRoughness;
+
 int CubemapFaceIndex;
 int CubemapFaceResolution;
 int CubemapMipFaceResolution;
 
-int Samples;
-float Roughness;
+Texture2D<float4> SkyboxVisibilityFace;
 
-RWTexture2D<float4> SceneRender;
-
-//NOTE: There is no such thing as a RWTextureCube unfortunately...
-//So to make do, we use a texture2D array.
-RWTexture2DArray<float4> CubemapResult;
+RWTexture2D<float4> CubemapFace;
 
 //NOTE: There is no such thing as a RWTextureCube unfortunately...
 //So to make do, we use a texture2D array.
+RWTexture2DArray<float4> CubemapOutput;
 RWTexture2DArray<float4> InputCubemap;
 
 #pragma kernel CubemapCombine
 [numthreads(THREAD_GROUP_SIZE_X, THREAD_GROUP_SIZE_Y, THREAD_GROUP_SIZE_Z)]
 void CubemapCombine(uint3 id : SV_DispatchThreadID)
 {
-    CubemapResult[uint3(id.xy, CubemapFaceIndex)] = SceneRender[uint2(id.x, (CubemapFaceResolution - 1) - id.y)];
+    //CubemapOutput[uint3(id.xy, CubemapFaceIndex)] = CubemapFace[uint2(id.x, (CubemapFaceResolution - 1) - id.y)] * SkyboxVisibilityFace[id.xy];
+    //CubemapOutput[uint3(id.xy, CubemapFaceIndex)] = CubemapFace[uint2((CubemapFaceResolution - 1) - id.x, id.y)] * SkyboxVisibilityFace[id.xy];
+    CubemapOutput[uint3(id.xy, CubemapFaceIndex)] = CubemapFace[uint2(id.xy)] * SkyboxVisibilityFace[id.xy].r;
 }
 
 //||||||||||||||||||||||||||||| UTILITY FUNCTIONS |||||||||||||||||||||||||||||
@@ -255,20 +256,20 @@ void ConvolveSpecularGGX(uint3 id : SV_DispatchThreadID)
         
     float4 result = float4(0, 0, 0, 0);
     
-    for (int i = 0; i < Samples; i++)
+    for (int i = 0; i < SpecularConvolutionSamples; i++)
     {
-        float2 sampleSet = Hammersley(i, Samples);
+        float2 sampleSet = Hammersley(i, SpecularConvolutionSamples);
 
-        float3 specularRayDirection = ImportanceSampleGGX_VNDF(sampleSet, rayDirection, rayDirection, Roughness);
+        float3 specularRayDirection = ImportanceSampleGGX_VNDF(sampleSet, rayDirection, rayDirection, SpecularRoughness);
         
         uint3 textureSampleCoords = RayDirectionToCubemapTexel(specularRayDirection);
         
         result += InputCubemap[textureSampleCoords];
     }
     
-    result /= Samples;
+    result /= SpecularConvolutionSamples;
     
     result = max(0.0f, result);
     
-    CubemapResult[uint3(id.xy, CubemapFaceIndex)] = result;
+    CubemapOutput[uint3(id.xy, CubemapFaceIndex)] = result;
 }
