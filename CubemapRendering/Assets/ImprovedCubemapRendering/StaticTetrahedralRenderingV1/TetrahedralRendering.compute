@@ -1,3 +1,13 @@
+//|||||||||||||||||||||||||||||||||||||| INCLUDES ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| INCLUDES ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| INCLUDES ||||||||||||||||||||||||||||||||||||||
+
+#include "TetrahedralMapping.cginc"
+
+//|||||||||||||||||||||||||||||||||||||| PARAMETERS ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| PARAMETERS ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| PARAMETERS ||||||||||||||||||||||||||||||||||||||
+
 Texture2DArray<float4> TetrahedralCubemapLUT;
 RWTexture2D<float4> TetrahedralColorMap;
 
@@ -14,9 +24,13 @@ RWTexture2DArray<float4> CubemapOutput;
 RWTexture2DArray<float4> CubemapInput;
 RWTexture2D<float4> CubemapOutput2D;
 
-#pragma kernel TetrahedralFaceCombine
+//|||||||||||||||||||||||||||||||||||||| TETRAHEDRON FACE COMBINE (NAIVE MAPPING) ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| TETRAHEDRON FACE COMBINE (NAIVE MAPPING) ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| TETRAHEDRON FACE COMBINE (NAIVE MAPPING) ||||||||||||||||||||||||||||||||||||||
+
+#pragma kernel TetrahedralFaceCombineNaive
 [numthreads(4, 4, 1)]
-void TetrahedralFaceCombine(uint3 id : SV_DispatchThreadID)
+void TetrahedralFaceCombineNaive(uint3 id : SV_DispatchThreadID)
 {
     float2 uv = (float2(0.5f, 0.5f) + uint2(id.xy)) / TetrahedronMapResolution;
     
@@ -61,6 +75,67 @@ void TetrahedralFaceCombine(uint3 id : SV_DispatchThreadID)
     }
 }
 
+//|||||||||||||||||||||||||||||||||||||| TETRAHEDRON FACE COMBINE (COMPACT MAPPING) ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| TETRAHEDRON FACE COMBINE (COMPACT MAPPING) ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| TETRAHEDRON FACE COMBINE (COMPACT MAPPING) ||||||||||||||||||||||||||||||||||||||
+/*
+#pragma kernel TetrahedralFaceCombineCompact
+[numthreads(4, 4, 1)]
+void TetrahedralFaceCombineCompact(uint3 id : SV_DispatchThreadID)
+{
+    float2 uv = (float2(0.5f, 0.5f) + uint2(id.xy)) / TetrahedronMapResolution;
+    
+    switch (TetrahedronFaceIndex)
+    {
+        case 0: //GREEN BOTTOM TRIANGLE
+            if (IsPointInTriangle(uv, float2(0.0f, 0.0f), float2(0.5f, 0.5f), float2(1.0f, 0.0f)))
+            {
+                float2 localUV = float2(uv.x, uv.y * 2.0f);
+                uint2 localUVInt = localUV * TetrahedronFaceResolution;
+                TetrahedronFaceMapOutput[id.xy] = TetrahedronFaceRender[localUVInt];
+            }
+        
+            break;
+        case 1: //YELLOW TOP TRIANGLE
+            if (IsPointInTriangle(uv, float2(0.0f, 1.0f), float2(0.5f, 0.5f), float2(1.0f, 1.0f)))
+            {
+                float2 localUV = float2(uv.x, (1.0f - uv.y) * 2.0f);
+                uint2 localUVInt = localUV * TetrahedronFaceResolution;
+                TetrahedronFaceMapOutput[id.xy] = TetrahedronFaceRender[localUVInt];
+            }
+        
+        //NOTE: FLIP ON Y
+        
+            break;
+        case 2: //BLUE RIGHT TRIANGLE
+            if (IsPointInTriangle(uv, float2(1.0f, 1.0f), float2(0.5f, 0.5f), float2(1.0f, 0.0f)))
+            {
+                float2 localUV = float2(uv.x * 2.0f - 1.0f, uv.y);
+                uint2 localUVInt = localUV * TetrahedronFaceResolution;
+                TetrahedronFaceMapOutput[id.xy] = TetrahedronFaceRender[localUVInt];
+            }
+        
+        //NOTE: ROTATE UV CLOCKWISE 90.0f
+
+            break;
+        case 3: //RED LEFT TRIANGLE
+            if (IsPointInTriangle(uv, float2(0.0f, 1.0f), float2(0.5f, 0.5f), float2(0.0f, 0.0f)))
+            {
+                float2 localUV = float2(uv.x * 2.0f, uv.y);
+                uint2 localUVInt = localUV * TetrahedronFaceResolution;
+                TetrahedronFaceMapOutput[id.xy] = TetrahedronFaceRender[localUVInt];
+            }
+        
+        //NOTE: ROTATE UV CLOCKWISE -90.0f
+
+            break;
+    }
+}
+*/
+//|||||||||||||||||||||||||||||||||||||| TETRAHEDRAL MAP TO CUBEMAP ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| TETRAHEDRAL MAP TO CUBEMAP ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| TETRAHEDRAL MAP TO CUBEMAP ||||||||||||||||||||||||||||||||||||||
+
 #pragma kernel TetrahedralMapToCubemap
 [numthreads(4, 4, 6)]
 void TetrahedralMapToCubemap(uint3 id : SV_DispatchThreadID)
@@ -70,6 +145,10 @@ void TetrahedralMapToCubemap(uint3 id : SV_DispatchThreadID)
     
     CubemapOutput[id.xyz] = TetrahedralColorMap[tetrahedralUVInt];
 }
+
+//|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEX2D) ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEX2D) ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEX2D) ||||||||||||||||||||||||||||||||||||||
 
 #pragma kernel CubemapToTexture2D
 [numthreads(4, 4, 1)]

@@ -32,6 +32,24 @@ namespace ImprovedCubemapRendering
             RGBA8
         }
 
+        public enum UpdateType
+        {
+            /// <summary>
+            /// Update Reflection Probe every frame.
+            /// </summary>
+            UpdateEveryFrame,
+
+            /// <summary>
+            /// Update Reflection Probe for a specified time interval.
+            /// </summary>
+            UpdateFPS,
+
+            /// <summary>
+            /// No updates (MANUAL)
+            /// </summary>
+            None
+        }
+
         //|||||||||||||||||||||||||||||||||||||| PUBLIC VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PUBLIC VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PUBLIC VARIABLES ||||||||||||||||||||||||||||||||||||||
@@ -41,7 +59,7 @@ namespace ImprovedCubemapRendering
 
         [Header("Properties")]
         public RealtimeCubemapTextureFormatType formatType = RealtimeCubemapTextureFormatType.RGBAHalf;
-        public bool update = true;
+        public UpdateType update = UpdateType.UpdateFPS;
         public int updateFPS = 30;
 
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
@@ -94,7 +112,8 @@ namespace ImprovedCubemapRendering
 
         private void Update()
         {
-            RenderRealtimeCubemap();
+            if(update == UpdateType.UpdateEveryFrame || update == UpdateType.UpdateFPS)
+                RenderRealtimeCubemap();
         }
 
         private void OnDisable()
@@ -223,6 +242,11 @@ namespace ImprovedCubemapRendering
             //again only time this needs to be updated is if resolutions change, and in that case we just need to set stuff up again
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV1.InputResolutionSquare, reflectionProbe.resolution);
 
+            //set the textures for the kernels ahead of time, no need to set it every frame
+            //the textures have random read/write enabled also so they will natrually get updated
+            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Input, cubemapFaceRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Output, cubemapFlippedFaceRender);
+
             //we are setup now to start rendering!
             isRealtimeRenderingSetup = true;
         }
@@ -275,7 +299,7 @@ namespace ImprovedCubemapRendering
                 return;
 
             //if it's not our time to update, then don't render!
-            if (Time.time < nextUpdateInterval && update)
+            if (Time.time < nextUpdateInterval && update == UpdateType.UpdateFPS)
                 return;
 
             //|||||||||||||||||||||||||||||||||||||| RENDER AND COMBINE CUBEMAP FACES ||||||||||||||||||||||||||||||||||||||
@@ -290,8 +314,6 @@ namespace ImprovedCubemapRendering
             probeCamera.Render();
 
             //flip render target
-            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Input, cubemapFaceRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Output, cubemapFlippedFaceRender);
             cubemapRenderingCompute.Dispatch(computeShaderKernelFlipRenderTarget, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
             
             //copy final flipped render target to the main cubemap
@@ -303,8 +325,6 @@ namespace ImprovedCubemapRendering
             probeCamera.Render();
 
             //flip render target
-            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Input, cubemapFaceRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Output, cubemapFlippedFaceRender);
             cubemapRenderingCompute.Dispatch(computeShaderKernelFlipRenderTarget, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //copy final flipped render target to the main cubemap
@@ -316,8 +336,6 @@ namespace ImprovedCubemapRendering
             probeCamera.Render();
 
             //flip render target
-            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Input, cubemapFaceRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Output, cubemapFlippedFaceRender);
             cubemapRenderingCompute.Dispatch(computeShaderKernelFlipRenderTarget, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //copy final flipped render target to the main cubemap
@@ -329,8 +347,6 @@ namespace ImprovedCubemapRendering
             probeCamera.Render();
 
             //flip render target
-            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Input, cubemapFaceRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Output, cubemapFlippedFaceRender);
             cubemapRenderingCompute.Dispatch(computeShaderKernelFlipRenderTarget, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //copy final flipped render target to the main cubemap
@@ -342,8 +358,6 @@ namespace ImprovedCubemapRendering
             probeCamera.Render();
 
             //flip render target
-            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Input, cubemapFaceRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Output, cubemapFlippedFaceRender);
             cubemapRenderingCompute.Dispatch(computeShaderKernelFlipRenderTarget, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //copy final flipped render target to the main cubemap
@@ -355,8 +369,6 @@ namespace ImprovedCubemapRendering
             probeCamera.Render();
 
             //flip render target
-            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Input, cubemapFaceRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelFlipRenderTarget, RealtimeCubemapRenderingShaderIDsV1.Output, cubemapFlippedFaceRender);
             cubemapRenderingCompute.Dispatch(computeShaderKernelFlipRenderTarget, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //copy final flipped render target to the main cubemap

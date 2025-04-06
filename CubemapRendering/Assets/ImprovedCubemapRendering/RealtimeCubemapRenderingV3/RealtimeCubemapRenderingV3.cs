@@ -41,6 +41,24 @@ namespace ImprovedCubemapRendering
             RGBA8
         }
 
+        public enum UpdateType
+        {
+            /// <summary>
+            /// Update Reflection Probe every frame.
+            /// </summary>
+            UpdateEveryFrame,
+
+            /// <summary>
+            /// Update Reflection Probe for a specified time interval.
+            /// </summary>
+            UpdateFPS,
+
+            /// <summary>
+            /// No updates (MANUAL)
+            /// </summary>
+            None
+        }
+
         public struct MipLevel
         {
             public int mipLevelSquareResolution;
@@ -59,7 +77,7 @@ namespace ImprovedCubemapRendering
 
         [Header("Properties")]
         public RealtimeCubemapTextureFormatType formatType = RealtimeCubemapTextureFormatType.RGBAHalf;
-        public bool update = true;
+        public UpdateType updateType = UpdateType.UpdateFPS;
         public int updateFPS = 30;
         public int GGXSpecularConvolutionSamples = 256;
 
@@ -113,7 +131,8 @@ namespace ImprovedCubemapRendering
 
         private void Update()
         {
-            RenderRealtimeCubemap();
+            if(updateType == UpdateType.UpdateEveryFrame || updateType == UpdateType.UpdateFPS)
+                RenderRealtimeCubemap();
         }
 
         private void OnDisable()
@@ -271,6 +290,14 @@ namespace ImprovedCubemapRendering
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapFaceResolution, reflectionProbe.resolution);
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.SpecularConvolutionSamples, GGXSpecularConvolutionSamples);
 
+            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER TEXTURES ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER TEXTURES ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER TEXTURES ||||||||||||||||||||||||||||||||||||||
+            //set the textures for the kernels ahead of time, no need to set it every frame
+            //the textures have random read/write enabled also so they will natrually get updated
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV3.CubemapFace, probeCameraRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV3.CubemapOutput, intermediateCubemap);
+
             //|||||||||||||||||||||||||||||||||||||| SETUP - MISC ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SETUP - MISC ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SETUP - MISC ||||||||||||||||||||||||||||||||||||||
@@ -326,7 +353,7 @@ namespace ImprovedCubemapRendering
                 return;
 
             //if it's not our time to update, then don't render!
-            if (Time.time < nextUpdateInterval && update)
+            if (Time.time < nextUpdateInterval && updateType == UpdateType.UpdateFPS)
                 return;
 
             //|||||||||||||||||||||||||||||||||||||| RENDER CUBEMAP FACES ||||||||||||||||||||||||||||||||||||||
@@ -342,8 +369,6 @@ namespace ImprovedCubemapRendering
 
             //flip render target and combine into intermediate cubemap
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapFaceIndex, 0);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV3.CubemapFace, probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV3.CubemapOutput, intermediateCubemap);
             cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //X Negative (X-)
@@ -353,8 +378,6 @@ namespace ImprovedCubemapRendering
 
             //flip render target and combine into intermediate cubemap
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapFaceIndex, 1);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV3.CubemapFace, probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV3.CubemapOutput, intermediateCubemap);
             cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //Y Positive (Y+)
@@ -364,8 +387,6 @@ namespace ImprovedCubemapRendering
 
             //flip render target and combine into intermediate cubemap
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapFaceIndex, 2);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV3.CubemapFace, probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV3.CubemapOutput, intermediateCubemap);
             cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //Y Negative (Y-)
@@ -375,8 +396,6 @@ namespace ImprovedCubemapRendering
 
             //flip render target and combine into intermediate cubemap
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapFaceIndex, 3);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV3.CubemapFace, probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV3.CubemapOutput, intermediateCubemap);
             cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //Z Positive (Z+)
@@ -386,8 +405,6 @@ namespace ImprovedCubemapRendering
 
             //flip render target and combine into intermediate cubemap
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapFaceIndex, 4);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV3.CubemapFace, probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV3.CubemapOutput, intermediateCubemap);
             cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //Z Negative (Z-)
@@ -397,8 +414,6 @@ namespace ImprovedCubemapRendering
 
             //flip render target and combine into intermediate cubemap
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapFaceIndex, 5);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV3.CubemapFace, probeCameraRender);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV3.CubemapOutput, intermediateCubemap);
             cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //generate mips so PBR shaders can sample a slightly blurrier version of the reflection cubemap
@@ -426,6 +441,8 @@ namespace ImprovedCubemapRendering
                 {
                     MipLevel mipLevel = mipLevels[mip];
 
+                    //note, unlike the compute kernel for combining rendered faces into a cubemap
+                    //the properties/textures here change for every mip level so they need to be updated accordingly
                     cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapFaceIndex, face);
                     cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapMipFaceResolution, mipLevel.mipLevelSquareResolution);
                     cubemapRenderingCompute.SetFloat(RealtimeCubemapRenderingShaderIDsV3.SpecularRoughness, mipLevel.roughnessLevel);

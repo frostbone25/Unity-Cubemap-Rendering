@@ -11,11 +11,11 @@ namespace ImprovedCubemapRendering
         //|||||||||||||||||||||||||||||||||||||| PUBLIC VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PUBLIC VARIABLES ||||||||||||||||||||||||||||||||||||||
 
-        //should we render our scene in half precison rather than float?
         //NOTE: since we are in a static context (or baked) we don't have to worry about performance.
         //so if you are in a scene that uses physical light units, you may want to retain floating point precison to avoid errors
         //otherwise, you could probably render in half and not notice a difference.
         [Header("Properties")]
+        [Tooltip("Should we render our scene in half precison rather than float?")]
         public bool renderInHalfPrecison;
 
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||

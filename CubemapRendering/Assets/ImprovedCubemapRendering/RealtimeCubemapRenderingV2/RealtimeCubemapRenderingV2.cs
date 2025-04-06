@@ -32,13 +32,31 @@ namespace ImprovedCubemapRendering
             RGBA8
         }
 
+        public enum UpdateType
+        {
+            /// <summary>
+            /// Update Reflection Probe every frame.
+            /// </summary>
+            UpdateEveryFrame,
+
+            /// <summary>
+            /// Update Reflection Probe for a specified time interval.
+            /// </summary>
+            UpdateFPS,
+
+            /// <summary>
+            /// No updates (MANUAL)
+            /// </summary>
+            None
+        }
+
         //|||||||||||||||||||||||||||||||||||||| PUBLIC VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PUBLIC VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PUBLIC VARIABLES ||||||||||||||||||||||||||||||||||||||
 
         [Header("Properties")]
         public RealtimeCubemapTextureFormatType formatType = RealtimeCubemapTextureFormatType.RGBAHalf;
-        public bool update = true;
+        public UpdateType updateType = UpdateType.UpdateFPS;
         public int updateFPS = 30;
 
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
@@ -83,7 +101,8 @@ namespace ImprovedCubemapRendering
 
         private void Update()
         {
-            RenderRealtimeCubemap();
+            if(updateType == UpdateType.UpdateEveryFrame || updateType == UpdateType.UpdateFPS)
+                RenderRealtimeCubemap();
         }
 
         private void OnDisable()
@@ -229,7 +248,7 @@ namespace ImprovedCubemapRendering
                 return;
 
             //if it's not our time to update, then don't render!
-            if (Time.time < nextUpdateInterval && update)
+            if (Time.time < nextUpdateInterval && updateType == UpdateType.UpdateFPS)
                 return;
 
             //SELF NOTE: I don't like this at all, because this changes it for the entire scene too (all of the cameras in it) if you don't switch it back.

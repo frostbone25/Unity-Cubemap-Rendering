@@ -38,6 +38,24 @@ namespace ImprovedCubemapRendering
             RGBA8
         }
 
+        public enum UpdateType
+        {
+            /// <summary>
+            /// Update Reflection Probe every frame.
+            /// </summary>
+            UpdateEveryFrame,
+
+            /// <summary>
+            /// Update Reflection Probe for a specified time interval.
+            /// </summary>
+            UpdateFPS,
+
+            /// <summary>
+            /// No updates (MANUAL)
+            /// </summary>
+            None
+        }
+
         public struct MipLevel
         {
             public int mipLevelSquareResolution;
@@ -70,7 +88,7 @@ namespace ImprovedCubemapRendering
 
         [Header("Properties")]
         public RealtimeCubemapTextureFormatType formatType = RealtimeCubemapTextureFormatType.RGBAHalf;
-        public bool update = true;
+        public UpdateType updateType = UpdateType.UpdateFPS;
         public int updateFPS = 30;
         public int GGXSpecularConvolutionSamples = 256;
 
@@ -133,7 +151,8 @@ namespace ImprovedCubemapRendering
 
         private void Update()
         {
-            RenderRealtimeCubemap();
+            if(updateType == UpdateType.UpdateEveryFrame || updateType == UpdateType.UpdateFPS)
+                RenderRealtimeCubemap();
         }
 
         private void OnDisable()
@@ -284,6 +303,14 @@ namespace ImprovedCubemapRendering
                 mipLevelResolution /= 2;
             }
 
+            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER TEXTURES ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER TEXTURES ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER TEXTURES ||||||||||||||||||||||||||||||||||||||
+            //set the textures for the kernels ahead of time, no need to set it every frame
+            //the textures have random read/write enabled also so they will natrually get updated
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapFace, cubemapFaceRender);
+            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, intermediateCubemap);
+
             //|||||||||||||||||||||||||||||||||||||| SETUP - SKYBOX MESH ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SETUP - SKYBOX MESH ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SETUP - SKYBOX MESH ||||||||||||||||||||||||||||||||||||||
@@ -343,7 +370,7 @@ namespace ImprovedCubemapRendering
                 return;
 
             //if it's not our time to update, then don't render!
-            if (Time.time < nextUpdateInterval && update)
+            if (Time.time < nextUpdateInterval && updateType == UpdateType.UpdateFPS)
                 return;
 
             //|||||||||||||||||||||||||||||||||||||| RENDER CUBEMAP FACES ||||||||||||||||||||||||||||||||||||||
@@ -363,9 +390,7 @@ namespace ImprovedCubemapRendering
             Graphics.ExecuteCommandBuffer(realtimeSkyboxCommandBuffer);
 
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, 0);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapFace, cubemapFaceRender);
             cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.SkyboxVisibilityFace, skyboxVisibilityXPOS);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, intermediateCubemap);
             cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //X Negative (X-)
@@ -379,9 +404,7 @@ namespace ImprovedCubemapRendering
             Graphics.ExecuteCommandBuffer(realtimeSkyboxCommandBuffer);
 
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, 1);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapFace, cubemapFaceRender);
             cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.SkyboxVisibilityFace, skyboxVisibilityXNEG);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, intermediateCubemap);
             cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //Y Positive (Y+)
@@ -395,9 +418,7 @@ namespace ImprovedCubemapRendering
             Graphics.ExecuteCommandBuffer(realtimeSkyboxCommandBuffer);
 
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, 2);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapFace, cubemapFaceRender);
             cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.SkyboxVisibilityFace, skyboxVisibilityYPOS);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, intermediateCubemap);
             cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //Y Negative (Y-)
@@ -411,9 +432,7 @@ namespace ImprovedCubemapRendering
             Graphics.ExecuteCommandBuffer(realtimeSkyboxCommandBuffer);
 
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, 3);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapFace, cubemapFaceRender);
             cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.SkyboxVisibilityFace, skyboxVisibilityYNEG);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, intermediateCubemap);
             cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //Z Positive (Z+)
@@ -427,9 +446,7 @@ namespace ImprovedCubemapRendering
             Graphics.ExecuteCommandBuffer(realtimeSkyboxCommandBuffer);
 
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, 4);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapFace, cubemapFaceRender);
             cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.SkyboxVisibilityFace, skyboxVisibilityZPOS);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, intermediateCubemap);
             cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //Z Negative (Z-)
@@ -443,9 +460,7 @@ namespace ImprovedCubemapRendering
             Graphics.ExecuteCommandBuffer(realtimeSkyboxCommandBuffer);
 
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, 5);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapFace, cubemapFaceRender);
             cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.SkyboxVisibilityFace, skyboxVisibilityZNEG);
-            cubemapRenderingCompute.SetTexture(computeShaderKernelCubemapCombine, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, intermediateCubemap);
             cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
             //generate mips so PBR shaders can sample a slightly blurrier version of the reflection cubemap
@@ -473,6 +488,8 @@ namespace ImprovedCubemapRendering
                 {
                     MipLevel mipLevel = specularConvolutionMipLevels[mip];
 
+                    //note, unlike the compute kernel for combining rendered faces into a cubemap
+                    //the properties/textures here change for every mip level so they need to be updated accordingly
                     cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, face);
                     cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapMipFaceResolution, mipLevel.mipLevelSquareResolution);
                     cubemapRenderingCompute.SetFloat(RealtimeCubemapRenderingShaderIDsV4.SpecularRoughness, mipLevel.roughnessLevel);

@@ -86,8 +86,8 @@ Shader "Unlit/TetrahedronRayDirectionLUT"
                 float horizontalFOV = _FOV_X; //131.55 | Original: 143.98570868
                 float verticalFOV = _FOV_Y * _FOV_Overdraw; //125.27438968
 
-                float3 rayDirection = GetNaiveTetrahedronRayDirectionFromUV(uv, horizontalFOV, verticalFOV);
-                //float3 rayDirection = GetCompactTetrahedronRayDirectionFromUV(uv, horizontalFOV, verticalFOV);
+                //float3 rayDirection = GetNaiveTetrahedronRayDirectionFromUV(uv, horizontalFOV, verticalFOV);
+                float3 rayDirection = GetCompactTetrahedronRayDirectionFromUV(uv, horizontalFOV, verticalFOV);
 
                 //float2 reconstructedUV = GetNaiveTetrahedronUVFromRayDirection(rayDirection, horizontalFOV, verticalFOV);
                 //float2 reconstructedUV = GetNaiveTetrahedronUVFromRayDirection(uv, rayDirection, horizontalFOV, verticalFOV);

@@ -154,7 +154,6 @@ float3 GetNaiveTetrahedronRayDirectionFromUV(float2 uv, float horizontalFOV, flo
 
         //rotate camera ray direction
         tetrahedronRayDirection = mul(GreenTopLeftQuadRotation, tetrahedronRayDirection);
-        tetrahedronRayDirection = normalize(tetrahedronRayDirection);
     }
     //YELLOW TOP RIGHT QUAD
     else if (uv.x > 0.5f && uv.y > 0.5f)
@@ -168,7 +167,6 @@ float3 GetNaiveTetrahedronRayDirectionFromUV(float2 uv, float horizontalFOV, flo
 
         //rotate camera ray direction
         tetrahedronRayDirection = mul(YellowTopRightQuadRotation, tetrahedronRayDirection);
-        tetrahedronRayDirection = normalize(tetrahedronRayDirection);
     }
     //BLUE BOTTOM LEFT QUAD
     else if (uv.x < 0.5f && uv.y < 0.5f)
@@ -182,7 +180,6 @@ float3 GetNaiveTetrahedronRayDirectionFromUV(float2 uv, float horizontalFOV, flo
 
         //rotate camera ray direction
         tetrahedronRayDirection = mul(BlueBottomLeftQuadRotation, tetrahedronRayDirection);
-        tetrahedronRayDirection = normalize(tetrahedronRayDirection);
     }
     //RED BOTTOM RIGHT QUAD
     else if (uv.x > 0.5f && uv.y < 0.5f)
@@ -196,7 +193,6 @@ float3 GetNaiveTetrahedronRayDirectionFromUV(float2 uv, float horizontalFOV, flo
 
         //rotate camera ray direction
         tetrahedronRayDirection = mul(RedBottomRightQuadRotation, tetrahedronRayDirection);
-        tetrahedronRayDirection = normalize(tetrahedronRayDirection);
     }
 
     return tetrahedronRayDirection;
@@ -232,7 +228,7 @@ float3 GetCompactTetrahedronRayDirectionFromUV(float2 uv, float horizontalFOV, f
     float tanHalfVertFOV = tan(radians(verticalFOV * 0.5f));
     float tanHalfHorzFOV = tan(radians(horizontalFOV * 0.5f));
 
-        //YELLOW TOP TRIANGLE
+    //YELLOW TOP TRIANGLE (CORRECT)
     if (IsPointInTriangle(uv, float2(0.0f, 1.0f), float2(0.5f, 0.5f), float2(1.0f, 1.0f)))
     {
         tetrahedronRayDirection = float3(1, 1, 0);
@@ -247,9 +243,8 @@ float3 GetCompactTetrahedronRayDirectionFromUV(float2 uv, float horizontalFOV, f
 
         //rotate camera ray direction
         tetrahedronRayDirection = RotateVectorByEuler(tetrahedronRayDirection, float3(27.36780516f, 180.0f, 0.0f)); //Pitch Yaw Roll
-        tetrahedronRayDirection = normalize(tetrahedronRayDirection);
     }
-    //GREEN BOTTOM TRIANGLE
+    //GREEN BOTTOM TRIANGLE (CORRECT)
     else if (IsPointInTriangle(uv, float2(0.0f, 0.0f), float2(0.5f, 0.5f), float2(1.0f, 0.0f)))
     {
         tetrahedronRayDirection = float3(0, 1, 0);
@@ -263,9 +258,8 @@ float3 GetCompactTetrahedronRayDirectionFromUV(float2 uv, float horizontalFOV, f
 
         //rotate camera ray direction
         tetrahedronRayDirection = RotateVectorByEuler(tetrahedronRayDirection, float3(27.36780516f, 0.0f, 0.0f)); //Pitch Yaw Roll
-        tetrahedronRayDirection = normalize(tetrahedronRayDirection);
     }
-    //RED LEFT TRIANGLE
+    //RED LEFT TRIANGLE (NOT CORRECT)
     else if (IsPointInTriangle(uv, float2(0.0f, 1.0f), float2(0.5f, 0.5f), float2(0.0f, 0.0f)))
     {
         tetrahedronRayDirection = float3(1, 0, 0);
@@ -274,16 +268,15 @@ float3 GetCompactTetrahedronRayDirectionFromUV(float2 uv, float horizontalFOV, f
         float2 localNormalizedDeviceCoordinates = localUV * 2.0f - 1.0f;
 
         //calculate camera ray direction
-        tetrahedronRayDirection = float3(localNormalizedDeviceCoordinates.x * tanHalfHorzFOV, localNormalizedDeviceCoordinates.y * tanHalfVertFOV, 1.0f);
+        tetrahedronRayDirection = float3(localNormalizedDeviceCoordinates.x * tanHalfVertFOV, localNormalizedDeviceCoordinates.y * tanHalfHorzFOV, 1.0f);
         tetrahedronRayDirection = normalize(tetrahedronRayDirection);
 
         //rotate camera ray direction
-        tetrahedronRayDirection = RotateVectorByEuler(tetrahedronRayDirection, float3(-27.36780516f, -90.0f, -90.0f)); //Pitch Yaw Roll
-        tetrahedronRayDirection = normalize(tetrahedronRayDirection);
-        tetrahedronRayDirection.x = -tetrahedronRayDirection.x;
-        tetrahedronRayDirection.z = -tetrahedronRayDirection.z;
+        tetrahedronRayDirection = RotateVectorByEuler(tetrahedronRayDirection, float3(-27.36780516f, 90.0f, 0.0f)); //Pitch Yaw Roll
+        tetrahedronRayDirection = RotateVectorByEuler(tetrahedronRayDirection, float3(-90.0f, -27.36780516f, 0.0f)); //Pitch Yaw Roll
+        tetrahedronRayDirection = RotateVectorByEuler(tetrahedronRayDirection, float3(0.0f, 0.0f, 27.36780516f)); //Pitch Yaw Roll
     }
-    //BLUE RIGHT TRIANGLE
+    //BLUE RIGHT TRIANGLE (NOT CORRECT)
     else if (IsPointInTriangle(uv, float2(1.0f, 1.0f), float2(0.5f, 0.5f), float2(1.0f, 0.0f)))
     {
         tetrahedronRayDirection = float3(0, 0, 1);
@@ -292,15 +285,12 @@ float3 GetCompactTetrahedronRayDirectionFromUV(float2 uv, float horizontalFOV, f
         float2 localNormalizedDeviceCoordinates = localUV * 2.0f - 1.0f;
 
         //calculate camera ray direction
-        tetrahedronRayDirection = float3(localNormalizedDeviceCoordinates.x * tanHalfHorzFOV, localNormalizedDeviceCoordinates.y * tanHalfVertFOV, 1.0f);
+        tetrahedronRayDirection = float3(localNormalizedDeviceCoordinates.x * tanHalfVertFOV, localNormalizedDeviceCoordinates.y * tanHalfHorzFOV, 1.0f);
         tetrahedronRayDirection = normalize(tetrahedronRayDirection);
 
         //rotate camera ray direction
-        tetrahedronRayDirection = RotateVectorByEuler(tetrahedronRayDirection, float3(-27.36780516f, -90.0f, -90.0f)); //Pitch Yaw Roll
-        tetrahedronRayDirection = normalize(tetrahedronRayDirection);
-
-        tetrahedronRayDirection.y = -tetrahedronRayDirection.y;
-        tetrahedronRayDirection.z = -tetrahedronRayDirection.z;
+        tetrahedronRayDirection = RotateVectorByEuler(tetrahedronRayDirection, float3(27.36780516f, -90.0f, -90.0f)); //Pitch Yaw Roll
+        tetrahedronRayDirection = RotateVectorByEuler(tetrahedronRayDirection, float3(180.0f, 0.0f, 0.0f)); //Pitch Yaw Roll
     }
 
     return tetrahedronRayDirection;
