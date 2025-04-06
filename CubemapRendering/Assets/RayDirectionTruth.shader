@@ -47,7 +47,8 @@ Shader "Unlit/RayDirectionTruth"
             {
                 float3 cameraWorldPositionViewPlane = i.cameraRelativeWorldPosition.xyz / dot(i.cameraRelativeWorldPosition.xyz, unity_WorldToCamera._m20_m21_m22);
                 float3 rayDirection = normalize(cameraWorldPositionViewPlane);
-
+                //rayDirection = pow(rayDirection, 1.0f / 2.2);
+                //rayDirection = rayDirection * 0.5 + 0.5;
                 return float4(rayDirection.xyz, 1);
             }
             ENDCG

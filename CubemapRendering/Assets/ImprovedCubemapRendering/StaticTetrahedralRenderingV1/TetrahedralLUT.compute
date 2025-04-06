@@ -1,0 +1,52 @@
+#define THREAD_GROUP_SIZE_X 4
+#define THREAD_GROUP_SIZE_Y 4
+#define THREAD_GROUP_SIZE_Z 1
+
+#include "CubemapSampling.cginc"
+#include "TetrahedralMapping.cginc"
+
+int CubemapFaceIndex;
+int CubemapFaceResolution;
+float2 TetrahedralMapResolution;
+
+float HorizontalFOV;
+float VerticalFOV;
+
+//NOTE: There is no such thing as a RWTextureCube unfortunately...
+//So to make do, we use a texture2D array.
+RWTexture2D<float4> Output;
+
+#pragma kernel CubemapToTetrahedralUV
+[numthreads(THREAD_GROUP_SIZE_X, THREAD_GROUP_SIZE_Y, THREAD_GROUP_SIZE_Z)]
+void CubemapToTetrahedralUV(uint3 id : SV_DispatchThreadID)
+{
+    float2 uv = (float2(0.5f, 0.5f) + id.xy) / CubemapFaceResolution;
+    float2 nvc = uv * 2.0f - 1.0f;
+    float3 cubemapReferenceRayDirection = CubemapTexelToDirection(nvc, CubemapFaceIndex);
+
+    // Brute-force search to find best matching UV
+    float2 bestTetrahedronUV = float2(0.0, 0.0);
+    float bestDotProductTest = -1.0;
+    
+    int resolutionWidth = TetrahedralMapResolution.x;
+    int resolutionHeight = TetrahedralMapResolution.y;
+
+    for (int x = 0; x < resolutionWidth; x++)
+    {
+        for (int y = 0; y < resolutionHeight; y++)
+        {
+            uint2 loopUVInt = uint2(x, y);
+            float2 loopUV = (float2(0.5f, 0.5f) + loopUVInt) / uint2(resolutionWidth, resolutionHeight);
+            float3 tetrahedronRayDirection = GetNaiveTetrahedronRayDirectionFromUV(loopUV, HorizontalFOV, VerticalFOV);
+            float dotProductTest = dot(cubemapReferenceRayDirection, tetrahedronRayDirection);
+
+            if (dotProductTest > bestDotProductTest)
+            {
+                bestDotProductTest = dotProductTest;
+                bestTetrahedronUV = loopUV;
+            }
+        }
+    }
+    
+    Output[id.xy] = float4(bestTetrahedronUV, 0, 1);
+}
