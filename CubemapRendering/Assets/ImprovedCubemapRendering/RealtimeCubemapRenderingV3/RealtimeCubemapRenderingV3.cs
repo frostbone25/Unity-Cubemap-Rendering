@@ -59,6 +59,12 @@ namespace ImprovedCubemapRendering
             None
         }
 
+        public enum SpecularConvolutionFilter
+        {
+            GGX,
+            Gaussian
+        }
+
         public struct MipLevel
         {
             public int mipLevelSquareResolution;
@@ -79,7 +85,12 @@ namespace ImprovedCubemapRendering
         public RealtimeCubemapTextureFormatType formatType = RealtimeCubemapTextureFormatType.RGBAHalf;
         public UpdateType updateType = UpdateType.UpdateFPS;
         public int updateFPS = 30;
-        public int GGXSpecularConvolutionSamples = 256;
+
+        [Header("Specular Convolution")]
+        public SpecularConvolutionFilter specularConvolutionFilter = SpecularConvolutionFilter.GGX;
+        public int GGXSamples = 256;
+        public int GaussianSamples = 8;
+        public float GaussianSampleOffsetMultiplier = 4.0f;
 
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
@@ -107,6 +118,7 @@ namespace ImprovedCubemapRendering
 
         private int computeShaderKernelCubemapCombine;
         private int computeShaderKernelConvolveSpecularGGX;
+        private int computeShaderKernelConvolveSpecularGaussian;
         private int computeShaderThreadGroupSizeX = 0;
         private int computeShaderThreadGroupSizeY = 0;
         private int computeShaderThreadGroupSizeZ = 0;
@@ -241,6 +253,7 @@ namespace ImprovedCubemapRendering
 
             computeShaderKernelCubemapCombine = cubemapRenderingCompute.FindKernel("CubemapCombine");
             computeShaderKernelConvolveSpecularGGX = cubemapRenderingCompute.FindKernel("ConvolveSpecularGGX");
+            computeShaderKernelConvolveSpecularGaussian = cubemapRenderingCompute.FindKernel("ConvolveSpecularGaussian");
             cubemapRenderingCompute.GetKernelThreadGroupSizes(computeShaderKernelCubemapCombine, out uint threadGroupSizeX, out uint threadGroupSizeY, out uint threadGroupSizeZ);
             computeShaderThreadGroupSizeX = Mathf.CeilToInt(intermediateCubemap.width / threadGroupSizeX);
             computeShaderThreadGroupSizeY = Mathf.CeilToInt(intermediateCubemap.height / threadGroupSizeY);
@@ -275,7 +288,9 @@ namespace ImprovedCubemapRendering
             }
 
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapFaceResolution, reflectionProbe.resolution);
-            cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.SpecularConvolutionSamples, GGXSpecularConvolutionSamples);
+            cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.SpecularConvolutionSamples, GGXSamples);
+            cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.GaussianSampleRadius, GaussianSamples);
+            cubemapRenderingCompute.SetFloat(RealtimeCubemapRenderingShaderIDsV3.GaussianSampleOffset, GaussianSampleOffsetMultiplier);
 
             //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER TEXTURES ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SETUP - COMPUTE SHADER TEXTURES ||||||||||||||||||||||||||||||||||||||
@@ -400,29 +415,47 @@ namespace ImprovedCubemapRendering
             cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapFaceIndex, 5);
             cubemapRenderingCompute.Dispatch(computeShaderKernelCubemapCombine, computeShaderThreadGroupSizeX, computeShaderThreadGroupSizeY, computeShaderThreadGroupSizeZ);
 
-            //generate mips so PBR shaders can sample a slightly blurrier version of the reflection cubemap
-            //IMPORTANT NOTE: this is not PBR compliant, PBR shaders in unity (and most engines if configured as such) actually need a special mip map setup for reflection cubemaps (specular convolution)
-            //so what actually comes from this is not correct nor should it be used (if you really really really have no other choice I suppose you can)
-            //with that said in a later version of this we do use a proper specular convolution setup, but this is here just for illustrative/simplicity purposes
-            intermediateCubemap.GenerateMips();
-
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
 
-            //iterate for each mip level
-            for (int mip = 1; mip < mipLevels.Length; mip++)
+            switch (specularConvolutionFilter)
             {
-                MipLevel mipLevel = mipLevels[mip];
+                case SpecularConvolutionFilter.GGX:
+                    //manually filter/generate the mip levels for the cubemap with a filter for specular convolution
+                    //NOTE: skip mip 0 because we just wrote to it, and it will be our "sourcE" texture
+                    for (int mip = 1; mip < mipLevels.Length; mip++)
+                    {
+                        MipLevel mipLevel = mipLevels[mip];
 
-                //note, unlike the compute kernel for combining rendered faces into a cubemap
-                //the properties/textures here change for every mip level so they need to be updated accordingly
-                cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapMipFaceResolution, mipLevel.mipLevelSquareResolution);
-                cubemapRenderingCompute.SetFloat(RealtimeCubemapRenderingShaderIDsV3.SpecularRoughness, mipLevel.roughnessLevel);
-                cubemapRenderingCompute.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeCubemapRenderingShaderIDsV3.InputCubemap, intermediateCubemap, mip - 1);
-                cubemapRenderingCompute.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeCubemapRenderingShaderIDsV3.CubemapOutput, intermediateCubemap, mip);
-                cubemapRenderingCompute.Dispatch(computeShaderKernelConvolveSpecularGGX, mipLevel.computeShaderKernelThreadGroupSizeX, mipLevel.computeShaderKernelThreadGroupSizeY, mipLevel.computeShaderKernelThreadGroupSizeZ);
+                        //note, unlike the compute kernel for combining rendered faces into a cubemap
+                        //the properties/textures here change for every mip level so they need to be updated accordingly
+                        cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapMipFaceResolution, mipLevel.mipLevelSquareResolution);
+                        cubemapRenderingCompute.SetFloat(RealtimeCubemapRenderingShaderIDsV3.SpecularRoughness, mipLevel.roughnessLevel);
+                        cubemapRenderingCompute.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeCubemapRenderingShaderIDsV3.CubemapInput, intermediateCubemap, mip - 1);
+                        cubemapRenderingCompute.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeCubemapRenderingShaderIDsV3.CubemapOutput, intermediateCubemap, mip);
+                        cubemapRenderingCompute.Dispatch(computeShaderKernelConvolveSpecularGGX, mipLevel.computeShaderKernelThreadGroupSizeX, mipLevel.computeShaderKernelThreadGroupSizeY, mipLevel.computeShaderKernelThreadGroupSizeZ);
+                    }
+
+                    break;
+                case SpecularConvolutionFilter.Gaussian:
+                    //manually filter/generate the mip levels for the cubemap with a filter for specular convolution
+                    //NOTE: skip mip 0 because we just wrote to it, and it will be our "sourcE" texture
+                    for (int mip = 1; mip < mipLevels.Length; mip++)
+                    {
+                        MipLevel mipLevel = mipLevels[mip];
+
+                        //note, unlike the compute kernel for combining rendered faces into a cubemap
+                        //the properties/textures here change for every mip level so they need to be updated accordingly
+                        cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapMipFaceResolution, mipLevel.mipLevelSquareResolution);
+                        cubemapRenderingCompute.SetTexture(computeShaderKernelConvolveSpecularGaussian, RealtimeCubemapRenderingShaderIDsV3.CubemapInput, intermediateCubemap, mip - 1);
+                        cubemapRenderingCompute.SetTexture(computeShaderKernelConvolveSpecularGaussian, RealtimeCubemapRenderingShaderIDsV3.CubemapOutput, intermediateCubemap, mip);
+                        cubemapRenderingCompute.Dispatch(computeShaderKernelConvolveSpecularGaussian, mipLevel.computeShaderKernelThreadGroupSizeX, mipLevel.computeShaderKernelThreadGroupSizeY, mipLevel.computeShaderKernelThreadGroupSizeZ);
+                    }
+
+                    break;
             }
+
             //|||||||||||||||||||||||||||||||||||||| TRANSFER FINAL RESULTS TO PROPER CUBEMAP ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| TRANSFER FINAL RESULTS TO PROPER CUBEMAP ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| TRANSFER FINAL RESULTS TO PROPER CUBEMAP ||||||||||||||||||||||||||||||||||||||

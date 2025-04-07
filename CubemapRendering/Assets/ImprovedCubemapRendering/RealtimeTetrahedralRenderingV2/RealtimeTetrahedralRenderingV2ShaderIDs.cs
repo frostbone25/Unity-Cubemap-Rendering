@@ -17,11 +17,11 @@ namespace ImprovedCubemapRendering
         public static int TetrahedralColorMap = Shader.PropertyToID("TetrahedralColorMap");
         public static int TetrahedralCubemapLUT = Shader.PropertyToID("TetrahedralCubemapLUT");
         public static int CubemapOutput = Shader.PropertyToID("CubemapOutput");
-
         public static int CubemapInput = Shader.PropertyToID("CubemapInput");
         public static int CubemapMipFaceResolution = Shader.PropertyToID("CubemapMipFaceResolution");
         public static int SpecularConvolutionSamples = Shader.PropertyToID("SpecularConvolutionSamples");
         public static int SpecularRoughness = Shader.PropertyToID("SpecularRoughness");
         public static int GaussianSampleRadius = Shader.PropertyToID("GaussianSampleRadius");
+        public static int GaussianSampleOffset = Shader.PropertyToID("GaussianSampleOffset");
     }
 }

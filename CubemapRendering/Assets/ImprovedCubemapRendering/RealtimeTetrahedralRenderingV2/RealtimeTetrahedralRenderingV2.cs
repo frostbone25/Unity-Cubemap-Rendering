@@ -6,6 +6,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using Unity.Collections;
+using static ImprovedCubemapRendering.RealtimeTetrahedralRenderingV2;
 
 namespace ImprovedCubemapRendering
 {
@@ -52,6 +53,12 @@ namespace ImprovedCubemapRendering
             None
         }
 
+        public enum SpecularConvolutionFilter
+        {
+            GGX,
+            Gaussian
+        }
+
         public struct MipLevel
         {
             public int mipLevelSquareResolution;
@@ -77,7 +84,12 @@ namespace ImprovedCubemapRendering
         public RealtimeCubemapTextureFormatType formatType = RealtimeCubemapTextureFormatType.RGBAHalf;
         public UpdateType updateType = UpdateType.UpdateFPS;
         public int updateFPS = 30;
-        public int GGXSpecularConvolutionSamples = 256;
+
+        [Header("Specular Convolution")]
+        public SpecularConvolutionFilter specularConvolutionFilter = SpecularConvolutionFilter.GGX;
+        public int GGXSamples = 256;
+        public int GaussianSamples = 8;
+        public float GaussianSampleOffsetMultiplier = 4.0f;
 
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
@@ -334,7 +346,9 @@ namespace ImprovedCubemapRendering
             }
 
             tetrahedralRenderingComputeShader.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapFaceResolution, reflectionProbe.resolution);
-            tetrahedralRenderingComputeShader.SetInt(RealtimeCubemapRenderingShaderIDsV3.SpecularConvolutionSamples, GGXSpecularConvolutionSamples);
+            tetrahedralRenderingComputeShader.SetInt(RealtimeCubemapRenderingShaderIDsV3.SpecularConvolutionSamples, GGXSamples);
+            tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV2ShaderIDs.GaussianSampleRadius, GaussianSamples);
+            tetrahedralRenderingComputeShader.SetFloat(RealtimeTetrahedralRenderingV2ShaderIDs.GaussianSampleOffset, GaussianSampleOffsetMultiplier);
 
             //we are setup now to start rendering!
             isRealtimeRenderingSetup = true;
@@ -454,26 +468,42 @@ namespace ImprovedCubemapRendering
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
-            intermediateCubemap.GenerateMips();
 
-            //iterate for each mip level
-            for (int mip = 1; mip < mipLevels.Length; mip++)
+            switch(specularConvolutionFilter)
             {
-                MipLevel mipLevel = mipLevels[mip];
+                case SpecularConvolutionFilter.GGX:
+                    //manually filter/generate the mip levels for the cubemap with a filter for specular convolution
+                    //NOTE: skip mip 0 because we just wrote to it, and it will be our "sourcE" texture
+                    for (int mip = 1; mip < mipLevels.Length; mip++)
+                    {
+                        MipLevel mipLevel = mipLevels[mip];
 
-                //note, unlike the compute kernel for combining rendered faces into a cubemap
-                //the properties/textures here change for every mip level so they need to be updated accordingly
-                tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV2ShaderIDs.CubemapMipFaceResolution, mipLevel.mipLevelSquareResolution);
-                tetrahedralRenderingComputeShader.SetFloat(RealtimeTetrahedralRenderingV2ShaderIDs.SpecularRoughness, mipLevel.roughnessLevel);
-                tetrahedralRenderingComputeShader.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapInput, intermediateCubemap, mip - 1);
-                tetrahedralRenderingComputeShader.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapOutput, intermediateCubemap, mip);
-                tetrahedralRenderingComputeShader.Dispatch(computeShaderKernelConvolveSpecularGGX, mipLevel.computeShaderKernelThreadGroupSizeX, mipLevel.computeShaderKernelThreadGroupSizeY, mipLevel.computeShaderKernelThreadGroupSizeZ);
+                        //note, unlike the compute kernel for combining rendered faces into a cubemap
+                        //the properties/textures here change for every mip level so they need to be updated accordingly
+                        tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV2ShaderIDs.CubemapMipFaceResolution, mipLevel.mipLevelSquareResolution);
+                        tetrahedralRenderingComputeShader.SetFloat(RealtimeTetrahedralRenderingV2ShaderIDs.SpecularRoughness, mipLevel.roughnessLevel);
+                        tetrahedralRenderingComputeShader.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapInput, intermediateCubemap, mip - 1);
+                        tetrahedralRenderingComputeShader.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapOutput, intermediateCubemap, mip);
+                        tetrahedralRenderingComputeShader.Dispatch(computeShaderKernelConvolveSpecularGGX, mipLevel.computeShaderKernelThreadGroupSizeX, mipLevel.computeShaderKernelThreadGroupSizeY, mipLevel.computeShaderKernelThreadGroupSizeZ);
+                    }
 
-                //tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV2ShaderIDs.CubemapMipFaceResolution, mipLevel.mipLevelSquareResolution);
-                //tetrahedralRenderingComputeShader.SetFloat(RealtimeTetrahedralRenderingV2ShaderIDs.GaussianSampleRadius, 16);
-                //tetrahedralRenderingComputeShader.SetTexture(computeShaderKernelConvolveSpecularGaussian, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapInput, intermediateCubemap, mip - 1);
-                //tetrahedralRenderingComputeShader.SetTexture(computeShaderKernelConvolveSpecularGaussian, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapOutput, intermediateCubemap, mip);
-                //tetrahedralRenderingComputeShader.Dispatch(computeShaderKernelConvolveSpecularGaussian, mipLevel.computeShaderKernelThreadGroupSizeX, mipLevel.computeShaderKernelThreadGroupSizeY, mipLevel.computeShaderKernelThreadGroupSizeZ);
+                    break;
+                case SpecularConvolutionFilter.Gaussian:
+                    //manually filter/generate the mip levels for the cubemap with a filter for specular convolution
+                    //NOTE: skip mip 0 because we just wrote to it, and it will be our "sourcE" texture
+                    for (int mip = 1; mip < mipLevels.Length; mip++)
+                    {
+                        MipLevel mipLevel = mipLevels[mip];
+
+                        //note, unlike the compute kernel for combining rendered faces into a cubemap
+                        //the properties/textures here change for every mip level so they need to be updated accordingly
+                        tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV2ShaderIDs.CubemapMipFaceResolution, mipLevel.mipLevelSquareResolution);
+                        tetrahedralRenderingComputeShader.SetTexture(computeShaderKernelConvolveSpecularGaussian, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapInput, intermediateCubemap, mip - 1);
+                        tetrahedralRenderingComputeShader.SetTexture(computeShaderKernelConvolveSpecularGaussian, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapOutput, intermediateCubemap, mip);
+                        tetrahedralRenderingComputeShader.Dispatch(computeShaderKernelConvolveSpecularGaussian, mipLevel.computeShaderKernelThreadGroupSizeX, mipLevel.computeShaderKernelThreadGroupSizeY, mipLevel.computeShaderKernelThreadGroupSizeZ);
+                    }
+
+                    break;
             }
 
             //|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEXCUBE) ||||||||||||||||||||||||||||||||||||||

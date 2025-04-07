@@ -5,6 +5,7 @@
 #include "CubemapSampling.cginc"
 #include "TetrahedralMapping.cginc"
 #include "SpecularConvolutionGGX.cginc"
+#include "SpecularConvolutionGaussian.cginc"
 
 //|||||||||||||||||||||||||||||||||||||| PARAMETERS ||||||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||||||| PARAMETERS ||||||||||||||||||||||||||||||||||||||
@@ -18,6 +19,13 @@ float2 TetrahedronFaceResolution;
 float2 CubemapOutput2DResolution;
 
 int TetrahedronFaceIndex;
+
+int CubemapMipFaceResolution;
+int SpecularConvolutionSamples;
+float SpecularRoughness;
+
+int GaussianSampleRadius;
+float GaussianSampleOffset;
 
 RWTexture2D<float4> TetrahedronFaceRender;
 RWTexture2D<float4> TetrahedronFaceMapOutput;
@@ -148,35 +156,9 @@ void TetrahedralMapToCubemap(uint3 id : SV_DispatchThreadID)
     CubemapOutput[id.xyz] = TetrahedralColorMap[tetrahedralUVInt];
 }
 
-//|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEX2D) ||||||||||||||||||||||||||||||||||||||
-//|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEX2D) ||||||||||||||||||||||||||||||||||||||
-//|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEX2D) ||||||||||||||||||||||||||||||||||||||
-
-#pragma kernel CubemapToTexture2D
-[numthreads(4, 4, 1)]
-void CubemapToTexture2D(uint3 id : SV_DispatchThreadID)
-{
-    float2 uv = (float2(0.5f, 0.5f) + uint2(id.xy)) / CubemapOutput2DResolution;
-
-    //compute a normalized X coordinate (so for each "face" we are on, it's 0..1 relative to each face)
-    float xNormalizedFace = (uv.x * 6.0f) % 1.0f;
-    int xNormalizedFaceInt = (int) (xNormalizedFace * CubemapOutput2DResolution.y);
-
-    //compute face index (remember we are doing a 6:1 cubemap layout)
-    int faceIndex = ((int) (uv.x * 6));
-
-    //reverse the input UV Y coordinate so the faces show up at the proper orentation
-    CubemapOutput2D[id.xy] = CubemapInput[uint3(xNormalizedFaceInt, (CubemapOutput2DResolution.y - 1) - id.y, faceIndex)];
-}
-
 //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLUTION GGX ||||||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLUTION GGX ||||||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLUTION GGX ||||||||||||||||||||||||||||||||||||||
-
-int CubemapMipFaceResolution;
-int SpecularConvolutionSamples;
-
-float SpecularRoughness;
 
 #pragma kernel ConvolveSpecularGGX
 [numthreads(4, 4, 6)]
@@ -208,50 +190,96 @@ void ConvolveSpecularGGX(uint3 id : SV_DispatchThreadID)
     CubemapOutput[id.xyz] = result;
 }
 
+//|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLUTION GAUSSIAN ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLUTION GAUSSIAN ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLUTION GAUSSIAN ||||||||||||||||||||||||||||||||||||||
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-int GaussianSampleRadius;
-
-float GaussianWeight(int x, int y, int radius)
-{
-    float sigma = radius / 2.0;
-    float coeff = 1.0 / (pow(2.0 * 3.14159265359 * sigma * sigma, 1.5));
-    float exponent = -(x * x + y * y) / (2.0 * sigma * sigma);
-    return coeff * exp(exponent);
-}
-
+/*
 #pragma kernel ConvolveSpecularGaussian
 [numthreads(4, 4, 6)]
 void ConvolveSpecularGaussian(uint3 id : SV_DispatchThreadID)
 {
     float4 result = float4(0, 0, 0, 0);
     float weightSum = 0.0;
+
+    int sampleCount = GaussianSampleRadius * 0.5f;
     
-    for (int x = -GaussianSampleRadius; x <= GaussianSampleRadius; x++)
+    for (int x = -sampleCount; x <= sampleCount; x++)
     {
-        for (int y = -GaussianSampleRadius; y <= GaussianSampleRadius; y++)
+        for (int y = -sampleCount; y <= sampleCount; y++)
         {
             uint2 samplePos = id.xy * 2 + uint2(x, y);
-            float weight = GaussianWeight(x, y, GaussianSampleRadius);
+            
+            //simple black outline fix
+            //(acts like clamp wrap mode on edges)
+            if (samplePos.x < 0)
+                samplePos.x = 0;
+            
+            if (samplePos.y < 0)
+                samplePos.y = 0;
+            
+            if (samplePos.x > (CubemapMipFaceResolution * 2) - 1)
+                samplePos.x = (CubemapMipFaceResolution * 2) - 1;
+            
+            if (samplePos.y > (CubemapMipFaceResolution * 2) - 1)
+                samplePos.y = (CubemapMipFaceResolution * 2) - 1;
+
+            float weight = GaussianWeight(x, y, sampleCount);
             result += CubemapInput[uint3(samplePos, id.z)] * weight;
             weightSum += weight;
         }
     }
     
     result /= weightSum;
+    CubemapOutput[id.xyz] = result;
+}
+*/
+
+//|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLUTION GAUSSIAN (EDGE FIX) ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLUTION GAUSSIAN (EDGE FIX) ||||||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLUTION GAUSSIAN (EDGE FIX) ||||||||||||||||||||||||||||||||||||||
+
+#pragma kernel ConvolveSpecularGaussian
+[numthreads(4, 4, 6)]
+void ConvolveSpecularGaussian(uint3 id : SV_DispatchThreadID)
+{
+    //the cubemap input we are pulling from is from the mip level higher than the current one, so x2 is needed.
+    float resolution = CubemapMipFaceResolution * 2.0f;
+    float invResolution = 1.0 / resolution;
+    float2 baseNVC = ((id.xy * 2.0 + 0.5) * invResolution) * 2.0f - 1.0f;
+    
+    //compute primary cubemap ray direction
+    float3 baseDir = CubemapTexelToDirection(baseNVC, id.z);
+
+    //cubemap tangent and bitangent vectors for the current face
+    float3 tangent;
+    float3 bitangent;
+    GetCubemapFaceBasis(id.z, tangent, bitangent);
+
+    float4 result = float4(0, 0, 0, 0);
+    float weightSum = 0.0;
+
+    int sampleCount = GaussianSampleRadius * 0.5f;
+    
+    for (int x = -sampleCount; x <= sampleCount; x++)
+    {
+        for (int y = -sampleCount; y <= sampleCount; y++)
+        {
+            float2 offsetUV = float2(x, y) * invResolution * GaussianSampleOffset;
+            float3 sampleDir = normalize(baseDir + offsetUV.x * tangent + offsetUV.y * bitangent);
+
+            uint sampleFace;
+            float2 sampleUV;
+            DirectionToCubemapUV(sampleDir, sampleFace, sampleUV);
+
+            uint2 texelPos = uint2(sampleUV * resolution);
+            float weight = GaussianWeight(x, y, sampleCount);
+            result += CubemapInput[uint3(texelPos, sampleFace)] * weight;
+            weightSum += weight;
+        }
+    }
+
+    result /= max(weightSum, 0.0001);
+    
     CubemapOutput[id.xyz] = result;
 }

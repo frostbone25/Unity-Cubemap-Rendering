@@ -145,24 +145,3 @@ void TetrahedralMapToCubemap(uint3 id : SV_DispatchThreadID)
     
     CubemapOutput[id.xyz] = TetrahedralColorMap[tetrahedralUVInt];
 }
-
-//|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEX2D) ||||||||||||||||||||||||||||||||||||||
-//|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEX2D) ||||||||||||||||||||||||||||||||||||||
-//|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEX2D) ||||||||||||||||||||||||||||||||||||||
-
-#pragma kernel CubemapToTexture2D
-[numthreads(4, 4, 1)]
-void CubemapToTexture2D(uint3 id : SV_DispatchThreadID)
-{
-    float2 uv = (float2(0.5f, 0.5f) + uint2(id.xy)) / CubemapOutput2DResolution;
-
-    //compute a normalized X coordinate (so for each "face" we are on, it's 0..1 relative to each face)
-    float xNormalizedFace = (uv.x * 6.0f) % 1.0f;
-    int xNormalizedFaceInt = (int) (xNormalizedFace * CubemapOutput2DResolution.y);
-
-    //compute face index (remember we are doing a 6:1 cubemap layout)
-    int faceIndex = ((int) (uv.x * 6));
-
-    //reverse the input UV Y coordinate so the faces show up at the proper orentation
-    CubemapOutput2D[id.xy] = CubemapInput[uint3(xNormalizedFaceInt, (CubemapOutput2DResolution.y - 1) - id.y, faceIndex)];
-}

@@ -11,14 +11,14 @@ namespace ImprovedCubemapRendering
     {
         public static int SpecularConvolutionSamples = Shader.PropertyToID("SpecularConvolutionSamples");
         public static int SpecularRoughness = Shader.PropertyToID("SpecularRoughness");
-
         public static int CubemapFaceIndex = Shader.PropertyToID("CubemapFaceIndex");
         public static int CubemapFaceResolution = Shader.PropertyToID("CubemapFaceResolution");
         public static int CubemapMipFaceResolution = Shader.PropertyToID("CubemapMipFaceResolution");
-
         public static int SkyboxVisibilityFace = Shader.PropertyToID("SkyboxVisibilityFace");
         public static int CubemapFace = Shader.PropertyToID("CubemapFace");
         public static int CubemapOutput = Shader.PropertyToID("CubemapOutput");
-        public static int InputCubemap = Shader.PropertyToID("InputCubemap");
+        public static int CubemapInput = Shader.PropertyToID("CubemapInput");
+        public static int GaussianSampleRadius = Shader.PropertyToID("GaussianSampleRadius");
+        public static int GaussianSampleOffset = Shader.PropertyToID("GaussianSampleOffset");
     }
 }
