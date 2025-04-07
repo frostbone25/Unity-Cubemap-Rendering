@@ -17,7 +17,7 @@ Here is what I've implemented so far...
 
 **NOTE:** One thing I would like to point out with many of these implementations, is that they have an additional ***Intermediate Cubemap*** render texture which is a 6 dimension Texture2DArray *(6 Texture2Ds)*. While this is the exact same technical makeup of a regular cubemap, you cannot write to a regular cubemap in a compute shader for some reason *(Unless if someone knows how to get around this or fix it in Unity, please let me know!)*. Since we need to often perform additional processing of the cubemap after all of it's faces are combined, we use this intermediate to do our processing. After processing is completed then we simply use Graphics.CopyTexture to transfer each of the slices and mips to the final native cubemap render texture. It would be ideal to work with the native cubemap render texture directly *(less memory usage)* but this is the workaround that has to be achieved.
 
-#### Static Cubemap Rendering V1
+## Static Cubemap Rendering V1
 
 This is a basic static implementation of rendering a cubemap in 6 passes. 
 
@@ -32,7 +32,7 @@ Specular convolution on the Cubemap is achieved by utilizing unity's built-in te
 
 ![screenshot](GithubContent/1-static-cube-screenshot.png)
 
-#### Realtime Cubemap Rendering V1
+## Realtime Cubemap Rendering V1
 
 This is a realtime implementation of cubemap rendering in 6 passes. 
 
@@ -50,7 +50,7 @@ In addition there is also an exposed Render Texture Format parameter, which give
 
 ![screenshot](GithubContent/2-realtime-cubeV1-screenshot.png)
 
-#### Realtime Cubemap Rendering V2
+## Realtime Cubemap Rendering V2
 
 *Similar to **[Realtime Cubemap Rendering V1](#realtime-cubemap-rendering-v1)**, but the implementation is leaner and simpler. There is no compute shader used here to combine the faces.*
 
@@ -70,7 +70,7 @@ In addition there is also an exposed Render Texture Format parameter, which give
 
 ![screenshot](GithubContent/3-realtime-cubeV2-screenshot.png)
 
-#### Realtime Cubemap Rendering V3
+## Realtime Cubemap Rendering V3
 
 *This is similar to **[Realtime Cubemap Rendering V1](#realtime-cubemap-rendering-v1)**, but the implementation includes GGX Specular Convolution.*
 
@@ -90,7 +90,7 @@ In addition with specular convolution, you have control over how many samples ar
 
 ![screenshot](GithubContent/4-realtime-cubeV3-screenshot.png)
 
-#### Realtime Cubemap Rendering V4
+## Realtime Cubemap Rendering V4
 
 *This is similar to **[Realtime Cubemap Rendering V3](#realtime-cubemap-rendering-v3)**, but the scene is mostly static, but the skybox is rendered in realtime.*
 
@@ -114,7 +114,7 @@ In addition with specular convolution, you have control over how many samples ar
 
 ![screenshot](GithubContent/5-realtime-cubeV4-screenshot.png)
 
-#### Static Tetrahedral Cubemap Rendering V1
+## Static Tetrahedral Cubemap Rendering V1
 
 This is a static implementation of tetrahedral cubemap rendering, which captures the scene in 4 passes instead of 6. The advantage of this approach is that less passes of the scene are required *(not useful in a static context)*, at the expense of less resolution.
 
@@ -131,7 +131,7 @@ Specular convolution on this Cubemap is achieved by utilizing unity's built-in t
 
 ![screenshot](GithubContent/6-static-tetra-screenshot.png)
 
-#### Realtime Tetrahedral Cubemap Rendering V1
+## Realtime Tetrahedral Cubemap Rendering V1
 
 This is a realtime implementation of tetrahedral cubemap rendering, which captures the scene in 4 passes instead of 6. The advantage of this approach is that less passes of the scene are required which means better performance at runtime, at the expense of less resolution.
 
@@ -151,7 +151,7 @@ In addition there is also an exposed Render Texture Format parameter, which give
 
 ![screenshot](GithubContent/7-realtime-tetraV1-screenshot.png)
 
-#### Realtime Tetrahedral Cubemap Rendering V2
+## Realtime Tetrahedral Cubemap Rendering V2
 
 This is a realtime implementation of tetrahedral cubemap rendering, which captures the scene in 4 passes instead of 6. The advantage of this approach is that less passes of the scene are required which means better performance at runtime, at the expense of less resolution.
 
@@ -171,6 +171,6 @@ In addition with specular convolution, you have control over how many samples ar
 
 ![screenshot](GithubContent/8-realtime-tetraV2-screenshot.png)
 
-### Credits / Resources
+## Credits / Resources
 - GPU Pro 3060 Guide to Shadows: Chapter 3 (Tetrahedron Shadow Mapping)
 - Pema99: Guidance with Tetrahedron Mapping
