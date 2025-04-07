@@ -212,5 +212,5 @@ In addition with specular convolution, you have control over how many samples ar
 ![screenshot](GithubContent/8-realtime-tetraV2-screenshot.png)
 
 ## Credits / Resources
-- GPU Pro 3060 Guide to Shadows: Chapter 3 (Tetrahedron Shadow Mapping)
-- Pema99: Guidance with Tetrahedron Mapping
+- **[GPU Pro 360 Guide to Shadows: Chapter 3 (Tetrahedron Shadow Mapping)](https://dl.acm.org/doi/abs/10.5555/3312014)**
+- **[Pema99](https://github.com/pema99)**: Guidance with Tetrahedron Mapping
