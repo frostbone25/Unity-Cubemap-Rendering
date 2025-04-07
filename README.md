@@ -15,7 +15,7 @@ Keep in mind some of these are still work-in-progress, but here is what I have s
 - **[Realtime Tetrahedral Cubemap Rendering V1](#realtime-tetrahedral-cubemap-rendering-v1)**
 - **[Realtime Tetrahedral Cubemap Rendering V2](#realtime-tetrahedral-cubemap-rendering-v2)**
 
-**NOTE:** One thing I would like to point out with many of these implementations, is that they have an additional ***Intermediate Cubemap*** render texture which is a 6 dimension Texture2DArray *(6 Texture2Ds)*. While this is the exact same technical makeup of a regular cubemap, you cannot write to a regular cubemap in a compute shader for some reason *(Unless if someone knows how to get around this or fix it in Unity, please let me know!)*. Since we need to often perform additional processing of the cubemap after all of it's faces are combined, we use this intermediate to do our processing. After processing is completed then we simply use Graphics.CopyTexture to transfer each of the slices and mips to the final native cubemap render texture. It would be ideal to work with the native cubemap render texture directly *(less memory usage)* but this is the workaround that has to be achieved.
+**NOTE:** One thing I would like to point out with many of these implementations, is that they have an additional ***Intermediate Cubemap*** render texture which is a 6 dimension [Texture2DArray](https://docs.unity3d.com/Manual/class-Texture2DArray.html) *(6 Texture2Ds)*. While this is the exact same technical makeup of a regular cubemap, you cannot write to a regular cubemap in a compute shader for some reason *(Unless if someone knows how to get around this or fix it in Unity, please let me know!)*. Since we need to often perform additional processing of the cubemap after all of it's faces are combined, we use this intermediate to do our processing. After processing is completed then we simply use [Graphics.CopyTexture](https://docs.unity3d.com/2022.3/Documentation/ScriptReference/Graphics.CopyTexture.html) to transfer each of the slices and mips to the final native cubemap render texture. It would be ideal to work with the native cubemap render texture directly *(less memory usage)* but this is the workaround that has to be achieved.
 
 ## Static Cubemap Rendering V1
 
@@ -39,7 +39,7 @@ This is a realtime implementation of cubemap rendering in 6 passes.
 
 #### Runtime
 
-A camera is positioned at the center of the reflection probe boundary, with a field of view of 90 degrees. It is then rotated in 6 different axis, and a frame is captured from each axis. The rendered 6 faces are combined into an intermediate cubemap render texture *(Texture2DArray)* using a compute shader. While copying each face into the intermediate cubemap, faces are re-oriented so they show up correctly. Then finally this intermediate render texture has it's data copied to a native cubemap render texture target. Lastly Mip-Maps get generated on the native cubemap render target.
+A camera is positioned at the center of the reflection probe boundary, with a field of view of 90 degrees. It is then rotated in 6 different axis, and a frame is captured from each axis. The rendered 6 faces are combined into an intermediate cubemap render texture [Texture2DArray](https://docs.unity3d.com/Manual/class-Texture2DArray.html) using a compute shader. While copying each face into the intermediate cubemap, faces are re-oriented so they show up correctly. Then finally this intermediate render texture has it's data copied to a native cubemap render texture target. Lastly Mip-Maps get generated on the native cubemap render target.
 
 ![component](GithubContent/2-realtime-cubeV1-component.png)
 
@@ -64,7 +64,7 @@ This is a realtime implementation of cubemap rendering in 6 passes.
 
 #### Runtime
 
-A camera is positioned at the center of the reflection probe boundary, with a field of view of 90 degrees. It is then rotated in 6 different axis, and a frame is captured from each axis. The rendered 6 faces are copied directly into the native cubemap render texture target using Graphics.CopyTexture. Then Mip-Maps get generated on the native cubemap render target.
+A camera is positioned at the center of the reflection probe boundary, with a field of view of 90 degrees. It is then rotated in 6 different axis, and a frame is captured from each axis. The rendered 6 faces are copied directly into the native cubemap render texture target using [Graphics.CopyTexture](https://docs.unity3d.com/2022.3/Documentation/ScriptReference/Graphics.CopyTexture.html). Then Mip-Maps get generated on the native cubemap render target.
 
 ![component](GithubContent/3-realtime-cubeV2-component.png)
 
@@ -89,7 +89,7 @@ This is a realtime implementation of cubemap rendering in 6 passes.
 
 #### Runtime
 
-A camera is positioned at the center of the reflection probe boundary, with a field of view of 90 degrees. It is then rotated in 6 different axis, and a frame is captured from each axis. The rendered 6 faces are combined into an intermediate cubemap render texture *(Texture2DArray)* using a compute shader. While copying each face into the intermediate cubemap, faces are re-oriented so they show up correctly. Next Specular Convolution (GGX Specular) processing is performed on the lower mip map levels of the intermediate render texture. Then finally the intermediate render texture has it's data copied to a native cubemap render texture target.
+A camera is positioned at the center of the reflection probe boundary, with a field of view of 90 degrees. It is then rotated in 6 different axis, and a frame is captured from each axis. The rendered 6 faces are combined into an intermediate cubemap render texture [Texture2DArray](https://docs.unity3d.com/Manual/class-Texture2DArray.html) using a compute shader. While copying each face into the intermediate cubemap, faces are re-oriented so they show up correctly. Next Specular Convolution (GGX Specular) processing is performed on the lower mip map levels of the intermediate render texture. Then finally the intermediate render texture has it's data copied to a native cubemap render texture target.
 
 ![component](GithubContent/4-realtime-cubeV3-component.png)
 
@@ -143,7 +143,7 @@ This is a static implementation of tetrahedral cubemap rendering, which captures
 
 A pre-processing/offline step required for this approach is generating a LUT from a compute shader that maps UVs from a cubemap into a tetrahedron map for a fast/efficent conversion of a tetrahedron map into a cubemap for use. There is also a LUT Supersampling property exposed on the component, which controls how precise the LUT is for mapping Cubemap Texel UVs to the Tetrahedron map at the expense of longer generation times. The higher the better the accuracy is, the lower it is the more pixelation can occur.
 
-A camera is positioned at the center of the reflection probe boundary, and rotated in 4 different orentations. Each of the rendered 4 faces from each axis are combined into a tetrahedron map using a compute shader. This tetrahedron map is then converted into a regular 6 sided intermediate Texture2DArray cubemap. Then it is converted into a 2D Cubemap texture, which then gets reimported by Unity to turn into a native cubemap file.
+A camera is positioned at the center of the reflection probe boundary, and rotated in 4 different orentations. Each of the rendered 4 faces from each axis are combined into a tetrahedron map using a compute shader. This tetrahedron map is then converted into a regular 6 sided intermediate [Texture2DArray](https://docs.unity3d.com/Manual/class-Texture2DArray.html) cubemap. Then it is converted into a 2D Cubemap texture, which then gets reimported by Unity to turn into a native cubemap file.
 
 Specular convolution on this Cubemap is achieved by utilizing unity's built-in texture tools just like **[Static Cubemap Rendering V1](#static-cubemap-rendering-v1)**.
 
@@ -169,7 +169,7 @@ A pre-processing/offline step required for this approach is generating a LUT fro
 
 #### Runtime
 
-A camera is positioned at the center of the reflection probe boundary, and rotated in 4 different orentations. Each of the rendered 4 faces from each axis are combined into a tetrahedron map using a compute shader. This tetrahedron map is then converted into a regular 6 sided intermediate Texture2DArray cubemap. Then the data from this intermediate cubemap is copied into a native cubemap render texture with Graphics.CopyTexture. Mips are generated on the final cubemap.
+A camera is positioned at the center of the reflection probe boundary, and rotated in 4 different orentations. Each of the rendered 4 faces from each axis are combined into a tetrahedron map using a compute shader. This tetrahedron map is then converted into a regular 6 sided intermediate [Texture2DArray](https://docs.unity3d.com/Manual/class-Texture2DArray.html) cubemap. Then the data from this intermediate cubemap is copied into a native cubemap render texture with [Graphics.CopyTexture](https://docs.unity3d.com/2022.3/Documentation/ScriptReference/Graphics.CopyTexture.html). Mips are generated on the final cubemap.
 
 ![component](GithubContent/7-realtime-tetraV1-component.png)
 
@@ -202,7 +202,7 @@ A pre-processing/offline step required for this approach is generating a LUT fro
 
 #### Runtime
 
-A camera is positioned at the center of the reflection probe boundary, and rotated in 4 different orentations. Each of the rendered 4 faces from each axis are combined into a tetrahedron map using a compute shader. This tetrahedron map is then converted into a regular 6 sided intermediate Texture2DArray cubemap. Specular Convolution (GGX Specular) processing is performed on the lower mip map levels of the intermediate cubemap render texture. Then finally the intermediate render texture has it's data copied to a native cubemap render texture target with Graphics.CopyTexture.
+A camera is positioned at the center of the reflection probe boundary, and rotated in 4 different orentations. Each of the rendered 4 faces from each axis are combined into a tetrahedron map using a compute shader. This tetrahedron map is then converted into a regular 6 sided intermediate [Texture2DArray](https://docs.unity3d.com/Manual/class-Texture2DArray.html) cubemap. Specular Convolution (GGX Specular) processing is performed on the lower mip map levels of the intermediate cubemap render texture. Then finally the intermediate render texture has it's data copied to a native cubemap render texture target with [Graphics.CopyTexture](https://docs.unity3d.com/2022.3/Documentation/ScriptReference/Graphics.CopyTexture.html).
 
 ![component](GithubContent/8-realtime-tetraV2-component.png)
 
