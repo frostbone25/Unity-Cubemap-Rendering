@@ -155,6 +155,8 @@ Specular convolution on this Cubemap is achieved by utilizing unity's built-in t
 
 ![screenshot](GithubContent/6-static-tetra-screenshot.png)
 
+![tetrahedron-map](GithubContent/tetrahedron-map.png)
+
 ## Realtime Tetrahedral Cubemap Rendering V1
 
 This is a realtime implementation of tetrahedral cubemap rendering, which captures the scene in 4 passes instead of 6. The advantage of this approach is that less passes of the scene are required which means better performance at runtime, at the expense of less resolution.
@@ -172,6 +174,8 @@ A camera is positioned at the center of the reflection probe boundary, and rotat
 ![context menu](GithubContent/7-realtime-tetraV1-menu.png)
 
 *Component Context Menu Functions*
+
+![tetrahedron-map](GithubContent/tetrahedron-map.png)
 
 #### Properties
 
@@ -201,6 +205,8 @@ A camera is positioned at the center of the reflection probe boundary, and rotat
 ![context menu](GithubContent/8-realtime-tetraV2-menu.png)
 
 *Component Context Menu Functions*
+
+![tetrahedron-map](GithubContent/tetrahedron-map.png)
 
 #### Properties
 
