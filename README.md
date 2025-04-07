@@ -52,7 +52,7 @@ A camera is positioned at the center of the reflection probe boundary, with a fi
 There is configurable update logic on the component where you can choose to update the cubemap every frame, or update it for a set FPS interval, or choose to update it manually. 
 In addition there is also an exposed Render Texture Format parameter, which gives you control over the memory usage by changing the format of the render textures. You can choose between RGBAFloat, RGBAHalf, RGB111110, or RGBA8.
 
-***NOTE:** No specular convolution is done here, so materials/shaders sampling lower mip levels of the environment reflection will look too sharp and incorrect.*
+***NOTE:** No specular convolution is done here, so materials/shaders sampling lower mip levels of the environment reflection will look too sharp and incorrect for rough materials.*
 
 ![screenshot](GithubContent/2-realtime-cubeV1-screenshot.png)
 
@@ -77,7 +77,7 @@ A camera is positioned at the center of the reflection probe boundary, with a fi
 There is configurable update logic on the component where you can choose to update the cubemap every frame, or update it for a set FPS interval, or choose to update it manually. 
 In addition there is also an exposed Render Texture Format parameter, which gives you control over the memory usage by changing the format of the render textures. You can choose between RGBAFloat, RGBAHalf, RGB111110, or RGBA8.
 
-***NOTE:** No specular convolution is done here, so materials/shaders sampling lower mip levels of the environment reflection will look too sharp and incorrect.*
+***NOTE:** No specular convolution is done here, so materials/shaders sampling lower mip levels of the environment reflection will look too sharp and incorrect for rough materials.*
 
 ![screenshot](GithubContent/3-realtime-cubeV2-screenshot.png)
 
@@ -178,7 +178,7 @@ A camera is positioned at the center of the reflection probe boundary, and rotat
 There is configurable update logic on the component where you can choose to update the cubemap every frame, or update it for a set FPS interval, or choose to update it manually. 
 In addition there is also an exposed Render Texture Format parameter, which gives you control over the memory usage by changing the format of the render textures. You can choose between RGBAFloat, RGBAHalf, RGB111110, or RGBA8.
 
-***NOTE:** No specular convolution is done here, so materials/shaders sampling lower mip levels of the environment reflection will look too sharp and incorrect.*
+***NOTE:** No specular convolution is done here, so materials/shaders sampling lower mip levels of the environment reflection will look too sharp and incorrect for rough materials.*
 
 ![screenshot](GithubContent/7-realtime-tetraV1-screenshot.png)
 
