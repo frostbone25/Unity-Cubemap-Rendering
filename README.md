@@ -184,6 +184,8 @@ In addition there is also an exposed Render Texture Format parameter, which give
 
 ## Realtime Tetrahedral Cubemap Rendering V2
 
+*This is similar to **[Realtime Tetrahedral Cubemap Rendering V1](#realtime-tetrahedral-cubemap-rendering-v1)**, but the implementation includes GGX Specular Convolution.*
+
 This is a realtime implementation of tetrahedral cubemap rendering, which captures the scene in 4 passes instead of 6. The advantage of this approach is that less passes of the scene are required which means better performance at runtime, at the expense of less resolution.
 
 #### Pre-Processing / Offline
