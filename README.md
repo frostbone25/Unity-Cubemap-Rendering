@@ -21,6 +21,8 @@ Keep in mind some of these are still work-in-progress, but here is what I have s
 
 This is a basic static implementation of rendering a cubemap in 6 passes. 
 
+#### Pre-Processing / Offline
+
 A camera is positioned at the center of the reflection probe boundary, with a field of view of 90 degrees. It is then rotated in 6 different axis, and a frame is captured from each axis. The rendered 6 faces are combined into a cubemap. 
 
 Specular convolution on the Cubemap is achieved by utilizing unity's built-in texture tools.
@@ -140,6 +142,8 @@ In addition with specular convolution, you have control over how many samples ar
 ## Static Tetrahedral Cubemap Rendering V1
 
 This is a static implementation of tetrahedral cubemap rendering, which captures the scene in 4 passes instead of 6. The advantage of this approach is that less passes of the scene are required *(not useful in a static context)*, at the expense of less resolution.
+
+#### Pre-Processing / Offline
 
 A pre-processing/offline step required for this approach is generating a LUT from a compute shader that maps UVs from a cubemap into a tetrahedron map for a fast/efficent conversion of a tetrahedron map into a cubemap for use. There is also a LUT Supersampling property exposed on the component, which controls how precise the LUT is for mapping Cubemap Texel UVs to the Tetrahedron map at the expense of longer generation times. The higher the better the accuracy is, the lower it is the more pixelation can occur.
 
