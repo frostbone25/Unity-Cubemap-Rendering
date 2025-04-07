@@ -157,6 +157,8 @@ Specular convolution on this Cubemap is achieved by utilizing unity's built-in t
 
 ![tetrahedron-map](GithubContent/tetrahedron-map.png)
 
+*Tetrahedron Environment Map: Note the current implementation here is the "Naive" mapping. It's simple and basic but not too efficent. In the GPU Pro 360 Article there is a section that described a much more compact/efficent mapping but that isn't fully implemented/working yet.* 
+
 ## Realtime Tetrahedral Cubemap Rendering V1
 
 This is a realtime implementation of tetrahedral cubemap rendering, which captures the scene in 4 passes instead of 6. The advantage of this approach is that less passes of the scene are required which means better performance at runtime, at the expense of less resolution.
@@ -176,6 +178,8 @@ A camera is positioned at the center of the reflection probe boundary, and rotat
 *Component Context Menu Functions*
 
 ![tetrahedron-map](GithubContent/tetrahedron-map.png)
+
+*Tetrahedron Environment Map: Note the current implementation here is the "Naive" mapping. It's simple and basic but not too efficent. In the GPU Pro 360 Article there is a section that described a much more compact/efficent mapping but that isn't fully implemented/working yet.* 
 
 #### Properties
 
@@ -207,6 +211,8 @@ A camera is positioned at the center of the reflection probe boundary, and rotat
 *Component Context Menu Functions*
 
 ![tetrahedron-map](GithubContent/tetrahedron-map.png)
+
+*Tetrahedron Environment Map: Note the current implementation here is the "Naive" mapping. It's simple and basic but not too efficent. In the GPU Pro 360 Article there is a section that described a much more compact/efficent mapping but that isn't fully implemented/working yet.* 
 
 #### Properties
 
