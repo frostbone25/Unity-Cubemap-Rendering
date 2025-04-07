@@ -2,7 +2,7 @@
 
 My adventures/implementations into de-coupling/reconstructing Unity Static and Realtime Reflection Probes. 
 
-The goal is to create a more customized/configurable/optimized reflection probe renderer fitted with a number of unique features/solutions for a variety of scenarios. In addition, to also have greater control over the rendering of reflection probes for creative/performance reasons. This repo also has an implementation of tetrahedral environment rendering *(4-pass)* for more performant reflection probes than native cubemaps *(6-pass)*. 
+The goal is to create a more customized/configurable/optimized reflection probe renderer fitted with a number of unique features/solutions for a variety of scenarios. In addition, to also have greater control over the rendering of reflection probes for creative/performance reasons. This repo also has an implementation of tetrahedral environment rendering *(4-pass)* for potentially more performant reflection probes than native cubemaps *(6-pass)*. 
 
 Keep in mind some of these are still work-in-progress, but here is what I have so far...
 
