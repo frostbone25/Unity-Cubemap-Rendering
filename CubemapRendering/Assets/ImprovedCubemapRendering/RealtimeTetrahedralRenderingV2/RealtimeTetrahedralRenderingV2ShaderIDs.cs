@@ -22,5 +22,6 @@ namespace ImprovedCubemapRendering
         public static int CubemapMipFaceResolution = Shader.PropertyToID("CubemapMipFaceResolution");
         public static int SpecularConvolutionSamples = Shader.PropertyToID("SpecularConvolutionSamples");
         public static int SpecularRoughness = Shader.PropertyToID("SpecularRoughness");
+        public static int GaussianSampleRadius = Shader.PropertyToID("GaussianSampleRadius");
     }
 }

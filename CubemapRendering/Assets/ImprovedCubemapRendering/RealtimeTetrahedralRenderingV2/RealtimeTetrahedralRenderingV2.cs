@@ -119,6 +119,7 @@ namespace ImprovedCubemapRendering
         private int computeShaderTetrahedralMapToCubemapZ = 0;
 
         private int computeShaderKernelConvolveSpecularGGX;
+        private int computeShaderKernelConvolveSpecularGaussian;
 
         private bool isSetup;
         private bool isRealtimeRenderingSetup;
@@ -278,6 +279,7 @@ namespace ImprovedCubemapRendering
             computeShaderTetrahedralFaceCombine = tetrahedralRenderingComputeShader.FindKernel("TetrahedralFaceCombineNaive");
             computeShaderTetrahedralMapToCubemap = tetrahedralRenderingComputeShader.FindKernel("TetrahedralMapToCubemap");
             computeShaderKernelConvolveSpecularGGX = tetrahedralRenderingComputeShader.FindKernel("ConvolveSpecularGGX");
+            computeShaderKernelConvolveSpecularGaussian = tetrahedralRenderingComputeShader.FindKernel("ConvolveSpecularGaussian");
 
             //to save constantly needing to compute thread group sizes, we only need to do it once here because it doesn't change
             //the only time we need to change this is if the render target changes resolution, and in that case we just need to set things up again
@@ -452,7 +454,6 @@ namespace ImprovedCubemapRendering
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
-
             intermediateCubemap.GenerateMips();
 
             //iterate for each mip level
@@ -467,6 +468,12 @@ namespace ImprovedCubemapRendering
                 tetrahedralRenderingComputeShader.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapInput, intermediateCubemap, mip - 1);
                 tetrahedralRenderingComputeShader.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapOutput, intermediateCubemap, mip);
                 tetrahedralRenderingComputeShader.Dispatch(computeShaderKernelConvolveSpecularGGX, mipLevel.computeShaderKernelThreadGroupSizeX, mipLevel.computeShaderKernelThreadGroupSizeY, mipLevel.computeShaderKernelThreadGroupSizeZ);
+
+                //tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV2ShaderIDs.CubemapMipFaceResolution, mipLevel.mipLevelSquareResolution);
+                //tetrahedralRenderingComputeShader.SetFloat(RealtimeTetrahedralRenderingV2ShaderIDs.GaussianSampleRadius, 16);
+                //tetrahedralRenderingComputeShader.SetTexture(computeShaderKernelConvolveSpecularGaussian, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapInput, intermediateCubemap, mip - 1);
+                //tetrahedralRenderingComputeShader.SetTexture(computeShaderKernelConvolveSpecularGaussian, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapOutput, intermediateCubemap, mip);
+                //tetrahedralRenderingComputeShader.Dispatch(computeShaderKernelConvolveSpecularGaussian, mipLevel.computeShaderKernelThreadGroupSizeX, mipLevel.computeShaderKernelThreadGroupSizeY, mipLevel.computeShaderKernelThreadGroupSizeZ);
             }
 
             //|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEXCUBE) ||||||||||||||||||||||||||||||||||||||

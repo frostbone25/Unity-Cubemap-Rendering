@@ -207,3 +207,51 @@ void ConvolveSpecularGGX(uint3 id : SV_DispatchThreadID)
     
     CubemapOutput[id.xyz] = result;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+int GaussianSampleRadius;
+
+float GaussianWeight(int x, int y, int radius)
+{
+    float sigma = radius / 2.0;
+    float coeff = 1.0 / (pow(2.0 * 3.14159265359 * sigma * sigma, 1.5));
+    float exponent = -(x * x + y * y) / (2.0 * sigma * sigma);
+    return coeff * exp(exponent);
+}
+
+#pragma kernel ConvolveSpecularGaussian
+[numthreads(4, 4, 6)]
+void ConvolveSpecularGaussian(uint3 id : SV_DispatchThreadID)
+{
+    float4 result = float4(0, 0, 0, 0);
+    float weightSum = 0.0;
+    
+    for (int x = -GaussianSampleRadius; x <= GaussianSampleRadius; x++)
+    {
+        for (int y = -GaussianSampleRadius; y <= GaussianSampleRadius; y++)
+        {
+            uint2 samplePos = id.xy * 2 + uint2(x, y);
+            float weight = GaussianWeight(x, y, GaussianSampleRadius);
+            result += CubemapInput[uint3(samplePos, id.z)] * weight;
+            weightSum += weight;
+        }
+    }
+    
+    result /= weightSum;
+    CubemapOutput[id.xyz] = result;
+}
