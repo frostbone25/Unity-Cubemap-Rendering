@@ -7,7 +7,6 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
-using static ImprovedCubemapRendering.RealtimeCubemapRenderingV4;
 
 //https://discussions.unity.com/t/specular-convolution-when-calculating-mip-maps-for-cubemap-render-texture/729652/15
 
@@ -102,7 +101,6 @@ namespace ImprovedCubemapRendering
         //whittling it down to atleast 2 would be ideal (camera render target, cubemap)
         private RenderTexture cubemapFaceRender;
         private RenderTexture intermediateCubemap;
-        private RenderTexture convolvedCubemap;
         private RenderTexture finalCubemap;
         private Rect cubemapFaceRenderViewport;
 
@@ -215,18 +213,6 @@ namespace ImprovedCubemapRendering
             intermediateCubemap.autoGenerateMips = false;
             intermediateCubemap.Create();
 
-            //NOTE: Since there is no native "RWTextureCube" we use a Tex2DArray with 6 slices which is similar to a cubemap setup.
-            convolvedCubemap = new RenderTexture(reflectionProbe.resolution, reflectionProbe.resolution, renderTargetDepthBits, GetRenderTextureFormatType(formatType));
-            convolvedCubemap.filterMode = FilterMode.Trilinear;
-            convolvedCubemap.wrapMode = TextureWrapMode.Clamp;
-            convolvedCubemap.volumeDepth = 6; //6 faces in cubemap
-            convolvedCubemap.dimension = UnityEngine.Rendering.TextureDimension.Tex2DArray;
-            convolvedCubemap.enableRandomWrite = true;
-            convolvedCubemap.isPowerOfTwo = true;
-            convolvedCubemap.useMipMap = true;
-            convolvedCubemap.autoGenerateMips = false;
-            convolvedCubemap.Create();
-
             //NOTE: This is a workaround since "RWTextureCube" objects don't exist in compute shaders, and we are working instead with a RWTexture2DArray with 6 elements.
             //Most shaders in the scene will expect a cubemap sampler, so we will create another render texture, with the cube dimension.
             finalCubemap = new RenderTexture(reflectionProbe.resolution, reflectionProbe.resolution, renderTargetDepthBits, GetRenderTextureFormatType(formatType));
@@ -289,7 +275,7 @@ namespace ImprovedCubemapRendering
 
             for (int i = 0; i < specularConvolutionMipLevels.Length; i++)
             {
-                cubemapRenderingCompute.GetKernelThreadGroupSizes(computeShaderKernelCubemapCombine, out uint mipThreadGroupSizeX, out uint mipThreadGroupSizeY, out uint mipThreadGroupSizeZ);
+                cubemapRenderingCompute.GetKernelThreadGroupSizes(computeShaderKernelConvolveSpecularGGX, out uint mipThreadGroupSizeX, out uint mipThreadGroupSizeY, out uint mipThreadGroupSizeZ);
 
                 specularConvolutionMipLevels[i] = new MipLevel()
                 {
@@ -345,9 +331,6 @@ namespace ImprovedCubemapRendering
 
             if (intermediateCubemap != null && intermediateCubemap.IsCreated())
                 intermediateCubemap.Release();
-
-            if (convolvedCubemap != null && convolvedCubemap.IsCreated())
-                convolvedCubemap.Release();
 
             if (finalCubemap != null && finalCubemap.IsCreated())
                 finalCubemap.Release();
@@ -473,45 +456,34 @@ namespace ImprovedCubemapRendering
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
 
-            //transfer mip 0 (this is done separately from the loop below as we do not want to blur it)
-            //this saves us a little extra work since the first mip level should be the original reflection
-            for (int face = 0; face < 6; face++)
+            //iterate for each mip level
+            for (int mip = 1; mip < specularConvolutionMipLevels.Length; mip++)
             {
-                Graphics.CopyTexture(intermediateCubemap, face, 0, convolvedCubemap, face, 0);
+                MipLevel mipLevel = specularConvolutionMipLevels[mip];
+
+                //note, unlike the compute kernel for combining rendered faces into a cubemap
+                //the properties/textures here change for every mip level so they need to be updated accordingly
+                cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapMipFaceResolution, mipLevel.mipLevelSquareResolution);
+                cubemapRenderingCompute.SetFloat(RealtimeCubemapRenderingShaderIDsV4.SpecularRoughness, mipLevel.roughnessLevel);
+                cubemapRenderingCompute.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeCubemapRenderingShaderIDsV4.InputCubemap, intermediateCubemap, mip - 1);
+                cubemapRenderingCompute.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, intermediateCubemap, mip);
+                cubemapRenderingCompute.Dispatch(computeShaderKernelConvolveSpecularGGX, mipLevel.computeShaderKernelThreadGroupSizeX, mipLevel.computeShaderKernelThreadGroupSizeY, mipLevel.computeShaderKernelThreadGroupSizeZ);
             }
 
-            //for each cubemap face
-            for (int face = 0; face < 6; face++)
-            {
-                //iterate for each mip level
-                for (int mip = 1; mip < specularConvolutionMipLevels.Length; mip++)
-                {
-                    MipLevel mipLevel = specularConvolutionMipLevels[mip];
-
-                    //note, unlike the compute kernel for combining rendered faces into a cubemap
-                    //the properties/textures here change for every mip level so they need to be updated accordingly
-                    cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapFaceIndex, face);
-                    cubemapRenderingCompute.SetInt(RealtimeCubemapRenderingShaderIDsV4.CubemapMipFaceResolution, mipLevel.mipLevelSquareResolution);
-                    cubemapRenderingCompute.SetFloat(RealtimeCubemapRenderingShaderIDsV4.SpecularRoughness, mipLevel.roughnessLevel);
-                    cubemapRenderingCompute.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeCubemapRenderingShaderIDsV4.InputCubemap, intermediateCubemap, mip);
-                    cubemapRenderingCompute.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeCubemapRenderingShaderIDsV4.CubemapOutput, convolvedCubemap, mip);
-                    cubemapRenderingCompute.Dispatch(computeShaderKernelConvolveSpecularGGX, mipLevel.computeShaderKernelThreadGroupSizeX, mipLevel.computeShaderKernelThreadGroupSizeY, mipLevel.computeShaderKernelThreadGroupSizeZ);
-                }
-            }
             //|||||||||||||||||||||||||||||||||||||| TRANSFER FINAL RESULTS TO PROPER CUBEMAP ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| TRANSFER FINAL RESULTS TO PROPER CUBEMAP ||||||||||||||||||||||||||||||||||||||
             //|||||||||||||||||||||||||||||||||||||| TRANSFER FINAL RESULTS TO PROPER CUBEMAP ||||||||||||||||||||||||||||||||||||||
 
             //then to transfer the data as efficently as possible, we use Graphics.CopyTexture to copy each slice into the cubemap!
             //after this then we have a render texture cubemap that we just wrote into!
-            for (int i = 0; i < convolvedCubemap.mipmapCount; i++)
+            for (int i = 0; i < intermediateCubemap.mipmapCount; i++)
             {
-                Graphics.CopyTexture(convolvedCubemap, 0, i, finalCubemap, 0, i);
-                Graphics.CopyTexture(convolvedCubemap, 1, i, finalCubemap, 1, i);
-                Graphics.CopyTexture(convolvedCubemap, 2, i, finalCubemap, 2, i);
-                Graphics.CopyTexture(convolvedCubemap, 3, i, finalCubemap, 3, i);
-                Graphics.CopyTexture(convolvedCubemap, 4, i, finalCubemap, 4, i);
-                Graphics.CopyTexture(convolvedCubemap, 5, i, finalCubemap, 5, i);
+                Graphics.CopyTexture(intermediateCubemap, 0, i, finalCubemap, 0, i);
+                Graphics.CopyTexture(intermediateCubemap, 1, i, finalCubemap, 1, i);
+                Graphics.CopyTexture(intermediateCubemap, 2, i, finalCubemap, 2, i);
+                Graphics.CopyTexture(intermediateCubemap, 3, i, finalCubemap, 3, i);
+                Graphics.CopyTexture(intermediateCubemap, 4, i, finalCubemap, 4, i);
+                Graphics.CopyTexture(intermediateCubemap, 5, i, finalCubemap, 5, i);
             }
 
             //update next time interval

@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace ImprovedCubemapRendering
 {
-    public static class RealtimeTetrahedralRenderingV1ShaderIDsV1
+    public static class RealtimeTetrahedralRenderingV1ShaderIDs
     {
         public static int TetrahedronFaceResolution = Shader.PropertyToID("TetrahedronFaceResolution");
         public static int TetrahedronMapResolution = Shader.PropertyToID("TetrahedronMapResolution");

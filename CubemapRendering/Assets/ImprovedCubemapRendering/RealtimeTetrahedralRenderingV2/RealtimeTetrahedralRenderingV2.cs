@@ -9,7 +9,7 @@ using Unity.Collections;
 
 namespace ImprovedCubemapRendering
 {
-    public class RealtimeTetrahedralRenderingV1 : MonoBehaviour
+    public class RealtimeTetrahedralRenderingV2 : MonoBehaviour
     {
         public enum RealtimeCubemapTextureFormatType
         {
@@ -52,6 +52,15 @@ namespace ImprovedCubemapRendering
             None
         }
 
+        public struct MipLevel
+        {
+            public int mipLevelSquareResolution;
+            public float roughnessLevel;
+            public int computeShaderKernelThreadGroupSizeX;
+            public int computeShaderKernelThreadGroupSizeY;
+            public int computeShaderKernelThreadGroupSizeZ;
+        }
+
         //|||||||||||||||||||||||||||||||||||||| PUBLIC VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PUBLIC VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PUBLIC VARIABLES ||||||||||||||||||||||||||||||||||||||
@@ -68,6 +77,7 @@ namespace ImprovedCubemapRendering
         public RealtimeCubemapTextureFormatType formatType = RealtimeCubemapTextureFormatType.RGBAHalf;
         public UpdateType updateType = UpdateType.UpdateFPS;
         public int updateFPS = 30;
+        public int GGXSpecularConvolutionSamples = 256;
 
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
         //|||||||||||||||||||||||||||||||||||||| PRIVATE VARIABLES ||||||||||||||||||||||||||||||||||||||
@@ -108,8 +118,12 @@ namespace ImprovedCubemapRendering
         private int computeShaderTetrahedralMapToCubemapY = 0;
         private int computeShaderTetrahedralMapToCubemapZ = 0;
 
+        private int computeShaderKernelConvolveSpecularGGX;
+
         private bool isSetup;
         private bool isRealtimeRenderingSetup;
+
+        private MipLevel[] mipLevels;
 
         private float nextUpdateInterval;
         private float updateTime;
@@ -149,10 +163,10 @@ namespace ImprovedCubemapRendering
 #if UNITY_EDITOR
             //get our compute shader manually if for whatever reason it wasn't assigned
             if (tetrahedralRenderingComputeShader == null)
-                tetrahedralRenderingComputeShader = AssetDatabase.LoadAssetAtPath<ComputeShader>("Assets/ImprovedCubemapRendering/RealtimeTetrahedralRenderingV1/TetrahedralRendering.compute");
+                tetrahedralRenderingComputeShader = AssetDatabase.LoadAssetAtPath<ComputeShader>("Assets/ImprovedCubemapRendering/RealtimeTetrahedralRenderingV2/TetrahedralRendering.compute");
 
             if (tetrahedralLutComputeShader == null)
-                tetrahedralLutComputeShader = AssetDatabase.LoadAssetAtPath<ComputeShader>("Assets/ImprovedCubemapRendering/RealtimeTetrahedralRenderingV1/TetrahedralLUT.compute");
+                tetrahedralLutComputeShader = AssetDatabase.LoadAssetAtPath<ComputeShader>("Assets/ImprovedCubemapRendering/RealtimeTetrahedralRenderingV2/TetrahedralLUT.compute");
 #endif
 
             //if there is no compute shader period, we are in trouble and we can't continue!
@@ -263,6 +277,7 @@ namespace ImprovedCubemapRendering
             //get some data from the compute shader once (they don't change, no reason to get them every frame anyway)
             computeShaderTetrahedralFaceCombine = tetrahedralRenderingComputeShader.FindKernel("TetrahedralFaceCombineNaive");
             computeShaderTetrahedralMapToCubemap = tetrahedralRenderingComputeShader.FindKernel("TetrahedralMapToCubemap");
+            computeShaderKernelConvolveSpecularGGX = tetrahedralRenderingComputeShader.FindKernel("ConvolveSpecularGGX");
 
             //to save constantly needing to compute thread group sizes, we only need to do it once here because it doesn't change
             //the only time we need to change this is if the render target changes resolution, and in that case we just need to set things up again
@@ -278,15 +293,46 @@ namespace ImprovedCubemapRendering
 
             //set the render resolution once, don't need to do it every frame
             //again only time this needs to be updated is if resolutions change, and in that case we just need to set stuff up again
-            tetrahedralRenderingComputeShader.SetVector(RealtimeTetrahedralRenderingV1ShaderIDs.TetrahedronFaceResolution, new Vector4(tetrahedronFaceRender.width, tetrahedronFaceRender.height, 0.0f, 0.0f));
-            tetrahedralRenderingComputeShader.SetVector(RealtimeTetrahedralRenderingV1ShaderIDs.TetrahedronMapResolution, new Vector4(tetrahedronMap.width, tetrahedronMap.height, 0.0f, 0.0f));
+            tetrahedralRenderingComputeShader.SetVector(RealtimeTetrahedralRenderingV2ShaderIDs.TetrahedronFaceResolution, new Vector4(tetrahedronFaceRender.width, tetrahedronFaceRender.height, 0.0f, 0.0f));
+            tetrahedralRenderingComputeShader.SetVector(RealtimeTetrahedralRenderingV2ShaderIDs.TetrahedronMapResolution, new Vector4(tetrahedronMap.width, tetrahedronMap.height, 0.0f, 0.0f));
 
-            tetrahedralRenderingComputeShader.SetTexture(computeShaderTetrahedralFaceCombine, RealtimeTetrahedralRenderingV1ShaderIDs.TetrahedronFaceRender, tetrahedronFaceRender);
-            tetrahedralRenderingComputeShader.SetTexture(computeShaderTetrahedralFaceCombine, RealtimeTetrahedralRenderingV1ShaderIDs.TetrahedronFaceMapOutput, tetrahedronMap);
+            tetrahedralRenderingComputeShader.SetTexture(computeShaderTetrahedralFaceCombine, RealtimeTetrahedralRenderingV2ShaderIDs.TetrahedronFaceRender, tetrahedronFaceRender);
+            tetrahedralRenderingComputeShader.SetTexture(computeShaderTetrahedralFaceCombine, RealtimeTetrahedralRenderingV2ShaderIDs.TetrahedronFaceMapOutput, tetrahedronMap);
 
-            tetrahedralRenderingComputeShader.SetTexture(computeShaderTetrahedralMapToCubemap, RealtimeTetrahedralRenderingV1ShaderIDs.TetrahedralColorMap, tetrahedronMap);
-            tetrahedralRenderingComputeShader.SetTexture(computeShaderTetrahedralMapToCubemap, RealtimeTetrahedralRenderingV1ShaderIDs.TetrahedralCubemapLUT, cubemapToTetrahedralLUT);
-            tetrahedralRenderingComputeShader.SetTexture(computeShaderTetrahedralMapToCubemap, RealtimeTetrahedralRenderingV1ShaderIDs.CubemapOutput, intermediateCubemap);
+            tetrahedralRenderingComputeShader.SetTexture(computeShaderTetrahedralMapToCubemap, RealtimeTetrahedralRenderingV2ShaderIDs.TetrahedralColorMap, tetrahedronMap);
+            tetrahedralRenderingComputeShader.SetTexture(computeShaderTetrahedralMapToCubemap, RealtimeTetrahedralRenderingV2ShaderIDs.TetrahedralCubemapLUT, cubemapToTetrahedralLUT);
+            tetrahedralRenderingComputeShader.SetTexture(computeShaderTetrahedralMapToCubemap, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapOutput, intermediateCubemap);
+
+            //|||||||||||||||||||||||||||||||||||||| SETUP - SPECULAR CONVOLUTION TERMS ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - SPECULAR CONVOLUTION TERMS ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SETUP - SPECULAR CONVOLUTION TERMS ||||||||||||||||||||||||||||||||||||||
+            //NOTE: here we precompute a number of variables ahead of time that don't need to be updated every frame
+            //This pertains to the mip levels that we sample/modify later when doing specular convolution
+
+            //calculate amount of mips a texture with the reflection probe resolution ought to have
+            int mipCount = (int)Mathf.Log(reflectionProbe.resolution, 2);
+            int mipLevelResolution = reflectionProbe.resolution;
+
+            mipLevels = new MipLevel[mipCount];
+
+            for (int i = 0; i < mipLevels.Length; i++)
+            {
+                tetrahedralRenderingComputeShader.GetKernelThreadGroupSizes(computeShaderKernelConvolveSpecularGGX, out uint mipThreadGroupSizeX, out uint mipThreadGroupSizeY, out uint mipThreadGroupSizeZ);
+
+                mipLevels[i] = new MipLevel()
+                {
+                    mipLevelSquareResolution = mipLevelResolution,
+                    roughnessLevel = Mathf.Pow((1.0f / mipLevels.Length) * i, 2),
+                    computeShaderKernelThreadGroupSizeX = Mathf.Max(Mathf.CeilToInt(mipLevelResolution / mipThreadGroupSizeX), 4),
+                    computeShaderKernelThreadGroupSizeY = Mathf.Max(Mathf.CeilToInt(mipLevelResolution / mipThreadGroupSizeY), 4),
+                    computeShaderKernelThreadGroupSizeZ = (int)mipThreadGroupSizeZ,
+                };
+
+                mipLevelResolution /= 2;
+            }
+
+            tetrahedralRenderingComputeShader.SetInt(RealtimeCubemapRenderingShaderIDsV3.CubemapFaceResolution, reflectionProbe.resolution);
+            tetrahedralRenderingComputeShader.SetInt(RealtimeCubemapRenderingShaderIDsV3.SpecularConvolutionSamples, GGXSpecularConvolutionSamples);
 
             //we are setup now to start rendering!
             isRealtimeRenderingSetup = true;
@@ -371,28 +417,28 @@ namespace ImprovedCubemapRendering
             //rotate and render view
             probeCameraGameObject.transform.rotation = probeCameraRotationTetrahedronFace0;
             probeCamera.Render();
-            tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV1ShaderIDs.TetrahedronFaceIndex, 0);
+            tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV2ShaderIDs.TetrahedronFaceIndex, 0);
             tetrahedralRenderingComputeShader.Dispatch(computeShaderTetrahedralFaceCombine, computeShaderTetrahedralFaceCombineX, computeShaderTetrahedralFaceCombineY, computeShaderTetrahedralFaceCombineZ);
 
             //X Negative (X-)
             //rotate and render view
             probeCameraGameObject.transform.rotation = probeCameraRotationTetrahedronFace1;
             probeCamera.Render();
-            tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV1ShaderIDs.TetrahedronFaceIndex, 1);
+            tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV2ShaderIDs.TetrahedronFaceIndex, 1);
             tetrahedralRenderingComputeShader.Dispatch(computeShaderTetrahedralFaceCombine, computeShaderTetrahedralFaceCombineX, computeShaderTetrahedralFaceCombineY, computeShaderTetrahedralFaceCombineZ);
 
             //Y Positive (Y+)
             //rotate and render view
             probeCameraGameObject.transform.rotation = probeCameraRotationTetrahedronFace2;
             probeCamera.Render();
-            tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV1ShaderIDs.TetrahedronFaceIndex, 2);
+            tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV2ShaderIDs.TetrahedronFaceIndex, 2);
             tetrahedralRenderingComputeShader.Dispatch(computeShaderTetrahedralFaceCombine, computeShaderTetrahedralFaceCombineX, computeShaderTetrahedralFaceCombineY, computeShaderTetrahedralFaceCombineZ);
 
             //Y Negative (Y-)
             //rotate and render view
             probeCameraGameObject.transform.rotation = probeCameraRotationTetrahedronFace3;
             probeCamera.Render();
-            tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV1ShaderIDs.TetrahedronFaceIndex, 3);
+            tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV2ShaderIDs.TetrahedronFaceIndex, 3);
             tetrahedralRenderingComputeShader.Dispatch(computeShaderTetrahedralFaceCombine, computeShaderTetrahedralFaceCombineX, computeShaderTetrahedralFaceCombineY, computeShaderTetrahedralFaceCombineZ);
 
             //|||||||||||||||||||||||||||||||||||||| TETRAHEDRON MAP INTO CUBEMAP ||||||||||||||||||||||||||||||||||||||
@@ -403,24 +449,41 @@ namespace ImprovedCubemapRendering
 
             tetrahedralRenderingComputeShader.Dispatch(computeShaderTetrahedralMapToCubemap, computeShaderTetrahedralMapToCubemapX, computeShaderTetrahedralMapToCubemapY, computeShaderTetrahedralMapToCubemapZ);
 
-            //|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEXCUBE) ||||||||||||||||||||||||||||||||||||||
-            //|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEXCUBE) ||||||||||||||||||||||||||||||||||||||
-            //|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEXCUBE) ||||||||||||||||||||||||||||||||||||||
-            //because we can't write into a texcube's directly, we need to have this seperate copy of an actual texcube.
-            //transfer data from our intermediate cubemap into the final cubemap.
+            //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| SPECULAR CONVOLVE CUBEMAP (TEX2DARRAY) ||||||||||||||||||||||||||||||||||||||
 
-            Graphics.CopyTexture(intermediateCubemap, 0, 0, finalCubemap, 0, 0);
-            Graphics.CopyTexture(intermediateCubemap, 1, 0, finalCubemap, 1, 0);
-            Graphics.CopyTexture(intermediateCubemap, 2, 0, finalCubemap, 2, 0);
-            Graphics.CopyTexture(intermediateCubemap, 3, 0, finalCubemap, 3, 0);
-            Graphics.CopyTexture(intermediateCubemap, 4, 0, finalCubemap, 4, 0);
-            Graphics.CopyTexture(intermediateCubemap, 5, 0, finalCubemap, 5, 0);
+            intermediateCubemap.GenerateMips();
 
-            //generate mips so PBR shaders can sample a slightly blurrier version of the reflection cubemap
-            //IMPORTANT NOTE: this is not PBR compliant, PBR shaders in unity (and most engines if configured as such) actually need a special mip map setup for reflection cubemaps (specular convolution)
-            //so what actually comes from this is not correct nor should it be used (if you really really really have no other choice I suppose you can)
-            //with that said in a later version of this we do use a proper specular convolution setup, but this is here just for illustrative/simplicity purposes
-            finalCubemap.GenerateMips();
+            //iterate for each mip level
+            for (int mip = 1; mip < mipLevels.Length; mip++)
+            {
+                MipLevel mipLevel = mipLevels[mip];
+
+                //note, unlike the compute kernel for combining rendered faces into a cubemap
+                //the properties/textures here change for every mip level so they need to be updated accordingly
+                tetrahedralRenderingComputeShader.SetInt(RealtimeTetrahedralRenderingV2ShaderIDs.CubemapMipFaceResolution, mipLevel.mipLevelSquareResolution);
+                tetrahedralRenderingComputeShader.SetFloat(RealtimeTetrahedralRenderingV2ShaderIDs.SpecularRoughness, mipLevel.roughnessLevel);
+                tetrahedralRenderingComputeShader.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapInput, intermediateCubemap, mip - 1);
+                tetrahedralRenderingComputeShader.SetTexture(computeShaderKernelConvolveSpecularGGX, RealtimeTetrahedralRenderingV2ShaderIDs.CubemapOutput, intermediateCubemap, mip);
+                tetrahedralRenderingComputeShader.Dispatch(computeShaderKernelConvolveSpecularGGX, mipLevel.computeShaderKernelThreadGroupSizeX, mipLevel.computeShaderKernelThreadGroupSizeY, mipLevel.computeShaderKernelThreadGroupSizeZ);
+            }
+
+            //|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEXCUBE) ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEXCUBE) ||||||||||||||||||||||||||||||||||||||
+            //|||||||||||||||||||||||||||||||||||||| CUBEMAP (TEX2DARRAY) TO CUBEMAP (TEXCUBE) ||||||||||||||||||||||||||||||||||||||
+
+            //then to transfer the data as efficently as possible, we use Graphics.CopyTexture to copy each slice into the cubemap!
+            //after this then we have a render texture cubemap that we just wrote into!
+            for (int i = 0; i < intermediateCubemap.mipmapCount; i++)
+            {
+                Graphics.CopyTexture(intermediateCubemap, 0, i, finalCubemap, 0, i);
+                Graphics.CopyTexture(intermediateCubemap, 1, i, finalCubemap, 1, i);
+                Graphics.CopyTexture(intermediateCubemap, 2, i, finalCubemap, 2, i);
+                Graphics.CopyTexture(intermediateCubemap, 3, i, finalCubemap, 3, i);
+                Graphics.CopyTexture(intermediateCubemap, 4, i, finalCubemap, 4, i);
+                Graphics.CopyTexture(intermediateCubemap, 5, i, finalCubemap, 5, i);
+            }
 
             //update next time interval
             //NOTE TO SELF: using Time.time in the long term might have precison issues later, would be prefered to switch this to double instead.
@@ -441,7 +504,7 @@ namespace ImprovedCubemapRendering
             SetupRealtimeRendering();
             RenderRealtimeTetrahedronMap();
 
-            string unityAssetPath = string.Format("Assets/ImprovedCubemapRendering/RealtimeTetrahedralRenderingV1/Data/{0}_{1}.asset", SceneManager.GetActiveScene().name, gameObject.name);
+            string unityAssetPath = string.Format("Assets/ImprovedCubemapRendering/RealtimeTetrahedralRenderingV2/Data/{0}_{1}.asset", SceneManager.GetActiveScene().name, gameObject.name);
 
             AssetDatabase.DeleteAsset(unityAssetPath);
             AssetDatabase.CreateAsset(finalCubemap, unityAssetPath);
@@ -514,7 +577,7 @@ namespace ImprovedCubemapRendering
             inputFaceData.Dispose();
             inputFace.Release();
 
-            AssetDatabase.CreateAsset(outputTexture2DArray, string.Format("Assets/ImprovedCubemapRendering/RealtimeTetrahedralRenderingV1/Data/CubemapToTetrahedronLUT_{0}.asset", reflectionProbe.resolution));
+            AssetDatabase.CreateAsset(outputTexture2DArray, string.Format("Assets/ImprovedCubemapRendering/RealtimeTetrahedralRenderingV2/Data/CubemapToTetrahedronLUT_{0}.asset", reflectionProbe.resolution));
         }
 
 #endif

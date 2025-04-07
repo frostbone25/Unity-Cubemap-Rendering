@@ -19309,6 +19309,7 @@ GameObject:
   - component: {fileID: 1771795926}
   - component: {fileID: 1771795927}
   - component: {fileID: 1771795929}
+  - component: {fileID: 1771795930}
   m_Layer: 0
   m_Name: Reflection Probe
   m_TagString: Untagged
@@ -19348,7 +19349,7 @@ ReflectionProbe:
   m_RenderDynamicObjects: 0
   m_UseOcclusionCulling: 1
   m_Importance: 1
-  m_CustomBakedTexture: {fileID: 8400000, guid: 32ffd1e4b0b5a194c9ba60bfd63d1493, type: 2}
+  m_CustomBakedTexture: {fileID: 8400000, guid: 6e663c9b85fe7d541bcb9e520fe1a0b5, type: 2}
 --- !u!4 &1771795922
 Transform:
   m_ObjectHideFlags: 0
@@ -19473,18 +19474,38 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1771795920}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 78fe68235b2672047a73a378a8bc39a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  cubemapToTetrahedralLUT: {fileID: 18700000, guid: 30fbf9d0fdd9daa47b23ba8f22654ea9, type: 2}
+  cubemapToTetrahedralLUT: {fileID: 0}
   tetrahedralRenderingComputeShader: {fileID: 7200000, guid: 27f51c9f20e6bd747af403eab3f92d85, type: 3}
   lutSupersampling: 2
   tetrahedralLutComputeShader: {fileID: 7200000, guid: 75234e56327089d4ea8f7b5dfe01c3a0, type: 3}
   formatType: 2
   updateType: 1
   updateFPS: 30
+--- !u!114 &1771795930
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1771795920}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5090fcbcb803c0b458f25a7a65969b03, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  cubemapToTetrahedralLUT: {fileID: 18700000, guid: 5cda6618f1fa8284ebde92bdf2a5c3cf, type: 2}
+  tetrahedralRenderingComputeShader: {fileID: 7200000, guid: f1670e81dcf4f7244ab536a4ca71ba4a, type: 3}
+  lutSupersampling: 2
+  tetrahedralLutComputeShader: {fileID: 7200000, guid: a6456dad065c8e64fab269f4be83ef39, type: 3}
+  formatType: 2
+  updateType: 1
+  updateFPS: 30
+  GGXSpecularConvolutionSamples: 256
 --- !u!1 &1793915873
 GameObject:
   m_ObjectHideFlags: 0

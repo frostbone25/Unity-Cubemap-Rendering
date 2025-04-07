@@ -107,7 +107,7 @@ float3 CubemapTexelToDirection(float2 positionNVC, uint faceId)
 }
 
 //custom function that reverses a given ray direction, into a TEX2DArray cubemap coordinate
-uint3 RayDirectionToCubemapTexel(float3 direction)
+uint3 RayDirectionToCubemapTexel(float3 direction, int cubemapResolution)
 {
     uint faceId = 0;
     float2 texelCoord = float2(0.0, 0.0);
@@ -167,7 +167,7 @@ uint3 RayDirectionToCubemapTexel(float3 direction)
     texelCoord = saturate(texelCoord);
     
     //return texel coordinates as uint3(texelCoord, faceId)
-    return uint3(texelCoord * CubemapMipFaceResolution, faceId);
+    return uint3(texelCoord * cubemapResolution, faceId);
 }
 
 //||||||||||||||||||||||||| SAMPLING |||||||||||||||||||||||||
@@ -241,14 +241,14 @@ half3 ImportanceSampleGGX_VNDF(float2 random, half3 normalWS, half3 viewDirWS, h
 }
 
 #pragma kernel ConvolveSpecularGGX
-[numthreads(THREAD_GROUP_SIZE_X, THREAD_GROUP_SIZE_Y, THREAD_GROUP_SIZE_Z)]
+[numthreads(THREAD_GROUP_SIZE_X, THREAD_GROUP_SIZE_Y, 6)]
 void ConvolveSpecularGGX(uint3 id : SV_DispatchThreadID)
 {
     //NOTE TO SELF: The 0.5f offsets here are CRITICAL when computing normalized UVs in a compute shader
     float2 normalizedUV = float2(id.x + 0.5f, id.y + 0.5f) / CubemapMipFaceResolution;
     float2 signedUV = normalizedUV * 2.0f - 1.0f;
     
-    float3 rayDirection = CubemapTexelToDirection(signedUV, CubemapFaceIndex);
+    float3 rayDirection = CubemapTexelToDirection(signedUV, id.z);
         
     float4 result = float4(0, 0, 0, 0);
     
@@ -258,7 +258,7 @@ void ConvolveSpecularGGX(uint3 id : SV_DispatchThreadID)
 
         float3 specularRayDirection = ImportanceSampleGGX_VNDF(sampleSet, rayDirection, rayDirection, SpecularRoughness);
         
-        uint3 textureSampleCoords = RayDirectionToCubemapTexel(specularRayDirection);
+        uint3 textureSampleCoords = RayDirectionToCubemapTexel(specularRayDirection, CubemapMipFaceResolution * 2);
         
         result += InputCubemap[textureSampleCoords];
     }
@@ -267,5 +267,5 @@ void ConvolveSpecularGGX(uint3 id : SV_DispatchThreadID)
     
     result = max(0.0f, result);
     
-    CubemapOutput[uint3(id.xy, CubemapFaceIndex)] = result;
+    CubemapOutput[id.xyz] = result;
 }
